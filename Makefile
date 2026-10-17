@@ -73,6 +73,19 @@ ps: ## Show container status
 restart-api: ## Rebuild and restart just the two API services
 	$(COMPOSE) up -d --build api-text api-images
 
+.PHONY: ingest
+ingest: ## Import a scrape via the running stack: make ingest FILE=scrape.jsonl [IMAGES=1] [DRY=1]
+	@test -n "$(FILE)" || { echo "usage: make ingest FILE=path/to/scrape.jsonl [IMAGES=1] [DRY=1] [CONFLICT=merge|skip|replace] [LIMIT=n]"; exit 1; }
+	@test -f "$(FILE)" || { echo "no such file: $(FILE)"; exit 1; }
+	@# Unlike `make import`, this needs no node on the host: the compiled script
+	@# already lives in the api image. The scrape is bind-mounted read-only
+	@# rather than copied, so a 2GB export costs nothing to hand over.
+	$(COMPOSE) run --rm --no-deps 	  -v "$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")":/tmp/scrape.jsonl:ro 	  api-text node dist/scripts/import-forum-scrape.js /tmp/scrape.jsonl 	  $(if $(CONFLICT),--conflict $(CONFLICT),) 	  $(if $(LIMIT),--limit $(LIMIT),) 	  $(if $(IMAGES),--images,) 	  $(if $(DRY),--dry-run,)
+
+.PHONY: stack-apikey
+stack-apikey: ## Mint a key via the running stack: make stack-apikey NAME="nightly" SCOPES=ingress:write
+	$(COMPOSE) run --rm --no-deps api-text 	  node dist/scripts/create-api-key.js "$(NAME)" "$(SCOPES)"
+
 .PHONY: psql
 psql: ## Open a psql shell on the archive database
 	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-archive} -d $${POSTGRES_DB:-archive}

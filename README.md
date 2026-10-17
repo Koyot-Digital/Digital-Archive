@@ -101,9 +101,25 @@ banner the whole time this is true, and the API **refuses to boot** with
 ```sh
 cp .env.example .env    # fill in the real values, set AUTH_ENABLED=true
 make up                 # build and start everything except the tunnels
-make apikey NAME="nightly scraper" SCOPES=ingress:write,images:write
+make stack-apikey NAME="nightly scraper" SCOPES=ingress:write,images:write
 make up-tunnels         # add the two cloudflared containers
 ```
+
+The `stack-` targets run the compiled script inside the api image, so a
+homeserver needs Docker and nothing else - no node, no pnpm, no `pnpm install`.
+Their `make apikey` / `make import` counterparts are for a dev machine that
+already has the workspace installed. Loading a scrape works the same way:
+
+```sh
+make ingest FILE=./roblox-modlogs-….jsonl DRY=1    # parse and report only
+make ingest FILE=./roblox-modlogs-….jsonl IMAGES=1
+```
+
+`--images` fetches each attachment from Discord's CDN, and those URLs are
+signed with roughly a day's validity - so `IMAGES=1` is worth it on a scrape
+taken hours ago and wasted on one taken last week, where every fetch 404s. The
+records, threads and attributions import either way; only the image bytes are
+time-limited.
 
 Migrations run automatically at boot, behind a Postgres advisory lock, so two
 containers starting together cannot race.
