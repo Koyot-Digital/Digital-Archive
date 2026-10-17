@@ -403,7 +403,7 @@ function parseCommandLine(line: string): CommandLine | null {
     rest = rest.slice(durationMatch[0].length).trim();
   }
 
-  const reason = rest.replace(/^[-–-:,.]\s*/, "").trim();
+  const reason = rest.replace(/^[-–:,.]\s*/, "").trim();
 
   return {
     struck: Boolean(match[1]) || /~~\s*$/.test(line.trim()),
@@ -673,7 +673,7 @@ export function parseDiscordModAction(body: string): ParsedModAction {
         .replace(PERMANENT, " ")
         .replace(/\b\d{15,24}\b/g, " ")
         .replace(/\s+/g, " ")
-        .replace(/^[-–-:,.\s]+|[\s,.]+$/g, "")
+        .replace(/^[-–:,.\s]+|[\s,.]+$/g, "")
         .trim();
 
       candidates.push({
