@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Palette.
+ *
+ * Dark by default — an archive is a tool, and tools get stared at for a long
+ * time. Light theme is available via [data-theme="light"] and follows the OS
+ * preference unless the viewer has pinned one.
+ */
+:root {
+  --bg: 8 9 11;
+  --surface: 14 15 18;
+  --raised: 20 21 25;
+  --line: 33 35 41;
+  --line-strong: 48 51 59;
+  --fg: 237 238 242;
+  --muted: 150 154 165;
+  --faint: 104 108 120;
+  --accent: 94 129 244;
+  --accent-fg: 255 255 255;
+
+  --sev-info: 125 131 145;
+  --sev-low: 86 160 221;
+  --sev-medium: 219 167 76;
+  --sev-high: 226 122 63;
+  --sev-critical: 226 78 78;
+
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: 252 252 253;
+    --surface: 255 255 255;
+    --raised: 247 248 250;
+    --line: 227 229 234;
+    --line-strong: 206 209 217;
+    --fg: 24 26 31;
+    --muted: 94 99 110;
+    --faint: 136 141 153;
+    --accent: 60 92 214;
+    --accent-fg: 255 255 255;
+
+    --sev-info: 120 126 140;
+    --sev-low: 42 112 176;
+    --sev-medium: 171 119 20;
+    --sev-high: 181 85 25;
+    --sev-critical: 190 44 44;
+
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: 252 252 253;
+  --surface: 255 255 255;
+  --raised: 247 248 250;
+  --line: 227 229 234;
+  --line-strong: 206 209 217;
+  --fg: 24 26 31;
+  --muted: 94 99 110;
+  --faint: 136 141 153;
+  --accent: 60 92 214;
+  --sev-info: 120 126 140;
+  --sev-low: 42 112 176;
+  --sev-medium: 171 119 20;
+  --sev-high: 181 85 25;
+  --sev-critical: 190 44 44;
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    @apply border-line;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A visible, consistent focus ring everywhere — the archive is keyboard-heavy. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-bg;
+  }
+
+  ::selection {
+    @apply bg-accent/30;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-[3px] border-solid border-transparent bg-line-strong bg-clip-content;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-faint bg-clip-content;
+  }
+}
+
+@layer components {
+  /* Rendered modlog bodies. Sanitised HTML from the API lands in here. */
+  .prose-archive {
+    @apply text-[0.9375rem] leading-7 text-fg/90;
+  }
+  .prose-archive > * + * {
+    @apply mt-4;
+  }
+  .prose-archive h1,
+  .prose-archive h2,
+  .prose-archive h3,
+  .prose-archive h4 {
+    @apply mt-7 font-semibold tracking-tight text-fg;
+  }
+  .prose-archive h1 {
+    @apply text-xl;
+  }
+  .prose-archive h2 {
+    @apply text-lg;
+  }
+  .prose-archive h3 {
+    @apply text-base;
+  }
+  .prose-archive h4 {
+    @apply text-sm uppercase tracking-wide text-muted;
+  }
+  .prose-archive a {
+    @apply font-medium text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:decoration-accent;
+  }
+  .prose-archive strong {
+    @apply font-semibold text-fg;
+  }
+  .prose-archive ul {
+    @apply list-disc space-y-1.5 pl-5;
+  }
+  .prose-archive ol {
+    @apply list-decimal space-y-1.5 pl-5;
+  }
+  .prose-archive blockquote {
+    @apply border-l-2 border-line-strong pl-4 italic text-muted;
+  }
+  .prose-archive code {
+    @apply rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[0.8125rem] text-fg;
+  }
+  .prose-archive pre {
+    @apply overflow-x-auto rounded-card border border-line bg-raised p-4 text-[0.8125rem] leading-6;
+  }
+  .prose-archive pre code {
+    @apply border-0 bg-transparent p-0;
+  }
+  .prose-archive hr {
+    @apply border-line;
+  }
+  .prose-archive img {
+    @apply rounded-card border border-line;
+  }
+  .prose-archive table {
+    @apply w-full border-collapse overflow-hidden rounded-card text-sm;
+  }
+  .prose-archive th,
+  .prose-archive td {
+    @apply border border-line px-3 py-2 text-left align-top;
+  }
+  .prose-archive th {
+    @apply bg-raised font-medium text-muted;
+  }
+
+  .card {
+    @apply rounded-card border border-line bg-surface;
+  }
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors;
+    height: 2rem;
+  }
+  .btn-ghost {
+    @apply border-transparent text-muted hover:bg-raised hover:text-fg;
+  }
+  .btn-outline {
+    @apply border-line bg-surface text-fg hover:border-line-strong hover:bg-raised;
+  }
+  .btn-primary {
+    @apply border-accent bg-accent text-accent-fg hover:brightness-110;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2 py-0.5 text-2xs font-medium text-muted;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden bg-raised;
+  }
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/5 to-transparent content-[''];
+  }
+}
+
+/* Honour the viewer's reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

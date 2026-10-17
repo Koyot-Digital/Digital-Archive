@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+# Evidence images have permanent URLs but should not be mirrored into image
+# search; the pages themselves are indexable.
+Disallow: /moderation
+Disallow: /login
+Disallow: /search

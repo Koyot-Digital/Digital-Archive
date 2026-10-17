@@ -1,0 +1,31 @@
+# Build inputs only: everything below either bloats the context or must not
+# reach an image.
+node_modules
+**/node_modules
+.git
+.github
+.next
+**/.next
+dist
+**/dist
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+data
+storage
+backups
+*.log
+logs
+
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+README.md
+docs
+infra/cloudflared/*.json
+Makefile

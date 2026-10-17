@@ -1,0 +1,274 @@
+name: digital-archive
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Digital Archive — homeserver stack
+#
+#  Topology:
+#
+#    Cloudflare                     homeserver
+#    ──────────                     ──────────
+#    archive.domain.com  ─tunnel─▶  caddy ─▶ web      (Next.js)
+#    api.domain.com      ─tunnel─▶  caddy ─┬▶ api-text   (JSON, ingress, auth)
+#                                          └▶ api-images (WebP bytes, uploads)
+#
+#  Three separate tunnels mean the text API, the image API and the web UI each
+#  have their own ingress path, their own cache rules at the edge and their own
+#  failure domain: saturating the image tunnel with a thousand screenshots
+#  cannot slow down an archive page load.
+#
+#  Nothing except the tunnels is published to the host network. Postgres,
+#  Redis and the internal images endpoint are reachable only on the compose
+#  network.
+# ═════════════════════════════════════════════════════════════════════════════
+
+x-api-env: &api-env
+  NODE_ENV: ${NODE_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  ROOT_DOMAIN: ${ROOT_DOMAIN}
+  WEB_ORIGIN: ${WEB_ORIGIN}
+  API_ORIGIN: ${API_ORIGIN}
+  API_PREFIX: ${API_PREFIX:-/digitalarchive/v1}
+  TEXT_PORT: ${TEXT_PORT:-4001}
+  IMAGES_PORT: ${IMAGES_PORT:-4002}
+  DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  PG_POOL_MAX: ${PG_POOL_MAX:-16}
+  REDIS_URL: redis://redis:6379
+  SESSION_SECRET: ${SESSION_SECRET}
+  INGRESS_HMAC_SECRET: ${INGRESS_HMAC_SECRET:-}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+  IMAGES_INTERNAL_URL: http://api-images:${IMAGES_PORT:-4002}
+  AUTH_ENABLED: ${AUTH_ENABLED:-true}
+  DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+  DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+  DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-}
+  DISCORD_REQUIRED_GUILD_ID: ${DISCORD_REQUIRED_GUILD_ID:-}
+  ADMIN_DISCORD_IDS: ${ADMIN_DISCORD_IDS:-}
+  MODERATOR_DISCORD_IDS: ${MODERATOR_DISCORD_IDS:-}
+  SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-14}
+  STORAGE_ROOT: /data/storage
+  IMAGE_MAX_UPLOAD_BYTES: ${IMAGE_MAX_UPLOAD_BYTES:-26214400}
+  IMAGE_MAX_EDGE: ${IMAGE_MAX_EDGE:-2400}
+  IMAGE_WEBP_QUALITY: ${IMAGE_WEBP_QUALITY:-72}
+  IMAGE_THUMB_EDGE: ${IMAGE_THUMB_EDGE:-480}
+  IMAGE_THUMB_QUALITY: ${IMAGE_THUMB_QUALITY:-58}
+  IMAGE_MAX_PER_LOG: ${IMAGE_MAX_PER_LOG:-24}
+  RATE_LIMIT_PUBLIC_PER_MIN: ${RATE_LIMIT_PUBLIC_PER_MIN:-240}
+  RATE_LIMIT_INGRESS_PER_MIN: ${RATE_LIMIT_INGRESS_PER_MIN:-120}
+  RATE_LIMIT_UPLOAD_PER_MIN: ${RATE_LIMIT_UPLOAD_PER_MIN:-60}
+  EMBED_UNFURL_ENABLED: ${EMBED_UNFURL_ENABLED:-true}
+  EMBED_UNFURL_TIMEOUT_MS: ${EMBED_UNFURL_TIMEOUT_MS:-4000}
+  TRUST_PROXY: "true"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  # ───────────────────────────── data ─────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    <<: [*restart]
+    logging: *logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # Checksums catch silent corruption on consumer-grade homeserver disks.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    command:
+      - postgres
+      - -c
+      - max_connections=120
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=12MB
+      - -c
+      - maintenance_work_mem=128MB
+      # SSD defaults: random reads are not 4x the cost of sequential ones.
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - log_min_duration_statement=500
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    <<: [*restart]
+    logging: *logging
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      # Rate-limit counters and caches are all disposable.
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+
+  # ───────────────────────── raw text data API ─────────────────────────
+  api-text:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    <<: [*restart]
+    logging: *logging
+    environment: *api-env
+    command: ["node", "dist/entry/text.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      # Read-only: only the images service writes to the store.
+      - archive-storage:/data/storage:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${TEXT_PORT:-4001}/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks: [internal]
+
+  # ───────────────────────────── images API ─────────────────────────────
+  api-images:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    <<: [*restart]
+    logging: *logging
+    environment: *api-env
+    command: ["node", "dist/entry/images.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      api-text: { condition: service_started }
+    volumes:
+      - archive-storage:/data/storage
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${IMAGES_PORT:-4002}/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    # libvips will happily use every core; keep some back for Postgres.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1536M
+    networks: [internal]
+
+  # ───────────────────────────── web interface ─────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+        NEXT_PUBLIC_SITE_NAME: ${NEXT_PUBLIC_SITE_NAME:-Digital Archive}
+    <<: [*restart]
+    logging: *logging
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      # Server-side renders talk to the API over the compose network.
+      INTERNAL_TEXT_API: http://api-text:${TEXT_PORT:-4001}${API_PREFIX:-/digitalarchive/v1}
+      INTERNAL_IMAGES_API: http://api-images:${IMAGES_PORT:-4002}${API_PREFIX:-/digitalarchive/v1}
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+      NEXT_PUBLIC_SITE_NAME: ${NEXT_PUBLIC_SITE_NAME:-Digital Archive}
+    depends_on:
+      api-text: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks: [internal]
+
+  # ───────────────────────────── edge ─────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    <<: [*restart]
+    logging: *logging
+    environment:
+      API_PREFIX: ${API_PREFIX:-/digitalarchive/v1}
+      TEXT_PORT: ${TEXT_PORT:-4001}
+      IMAGES_PORT: ${IMAGES_PORT:-4002}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api-text: { condition: service_started }
+      api-images: { condition: service_started }
+      web: { condition: service_started }
+    networks: [internal]
+
+  # ──────────────────────── tunnels (one per surface) ────────────────────────
+  # Each token comes from its own Cloudflare tunnel. Point the tunnel's public
+  # hostname at the matching caddy port below.
+  #   archive.domain.com -> http://caddy:8080
+  #   api.domain.com     -> http://caddy:8081   (text, and /images/* proxied on)
+  tunnel-web:
+    image: cloudflare/cloudflared:latest
+    <<: [*restart]
+    logging: *logging
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN_WEB}
+    depends_on: [caddy]
+    networks: [internal]
+    profiles: [tunnels]
+
+  tunnel-text:
+    image: cloudflare/cloudflared:latest
+    <<: [*restart]
+    logging: *logging
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN_TEXT}
+    depends_on: [caddy]
+    networks: [internal]
+    profiles: [tunnels]
+
+  tunnel-images:
+    image: cloudflare/cloudflared:latest
+    <<: [*restart]
+    logging: *logging
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN_IMAGES}
+    depends_on: [caddy]
+    networks: [internal]
+    profiles: [tunnels]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  archive-storage:
+  caddy-data:
+  caddy-config:

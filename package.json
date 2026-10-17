@@ -1,0 +1,27 @@
+{
+  "name": "digital-archive",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @archive/shared build && pnpm -r --parallel dev",
+    "dev:api": "pnpm --filter @archive/api dev:text",
+    "dev:images": "pnpm --filter @archive/api dev:images",
+    "dev:web": "pnpm --filter @archive/web dev",
+    "build": "pnpm --filter @archive/shared build && pnpm --filter @archive/api build && pnpm --filter @archive/web build",
+    "typecheck": "pnpm --filter @archive/shared build && pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "migrate": "pnpm --filter @archive/api migrate",
+    "seed": "pnpm --filter @archive/api seed",
+    "apikey": "pnpm --filter @archive/api apikey",
+    "up": "docker compose up -d --build",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f --tail=100",
+    "build:shared": "pnpm --filter @archive/shared build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

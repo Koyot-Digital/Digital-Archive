@@ -1,0 +1,143 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  Caddy — internal reverse proxy
+#
+#  TLS terminates at Cloudflare, so Caddy serves plain HTTP on the compose
+#  network and never needs a certificate. Each listener corresponds to one
+#  Cloudflare tunnel:
+#
+#    :8080  archive.domain.com                              -> web
+#    :8081  api.domain.com                                  -> api-text
+#    :8082  api.domain.com/digitalarchive/v1/images/*       -> api-images
+#
+#  Splitting the API across two listeners (and two tunnels) is the point of
+#  the layout: image traffic is large, cacheable and bursty, archive reads are
+#  small and latency-sensitive, and neither should be able to starve the other.
+# ═════════════════════════════════════════════════════════════════════════════
+
+{
+	admin off
+	auto_https off
+	servers {
+		# Cloudflare sits in front; trust its forwarded client address.
+		trusted_proxies static private_ranges
+	}
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+(common) {
+	header {
+		-Server
+		-X-Powered-By
+		X-Content-Type-Options nosniff
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ───────────────────────── web interface (tunnel-web) ─────────────────────────
+:8080 {
+	import common
+	encode zstd gzip
+
+	# Next.js build assets are content-hashed and safe to pin forever.
+	@static path /_next/static/* /favicon.ico /robots.txt
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	reverse_proxy web:3000 {
+		header_up X-Real-IP {remote_host}
+		# The app needs the real scheme to build absolute URLs.
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# ──────────────────── raw text data API (tunnel-text) ────────────────────
+:8081 {
+	import common
+	encode zstd gzip
+
+	# Belt and braces: even if the images tunnel is misconfigured and image
+	# requests arrive here, they still reach the right service rather than
+	# 404ing against the text API.
+	handle {$API_PREFIX}/images/* {
+		reverse_proxy api-images:{$IMAGES_PORT} {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	# The ingress path accepts multi-megabyte batches.
+	handle {$API_PREFIX}/ingress* {
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy api-text:{$TEXT_PORT} {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+			transport http {
+				# A 500-record batch with remote images can take a while.
+				read_timeout 180s
+			}
+		}
+	}
+
+	# The text service's internal endpoints must never be publicly reachable.
+	handle /internal/* {
+		respond 404
+	}
+	handle {$API_PREFIX}/internal/* {
+		respond 404
+	}
+
+	handle {
+		request_body {
+			max_size 2MB
+		}
+		reverse_proxy api-text:{$TEXT_PORT} {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+		}
+	}
+}
+
+# ───────────────────────── images API (tunnel-images) ─────────────────────────
+:8082 {
+	import common
+
+	# No `encode` here on purpose: the payloads are already-compressed WebP, so
+	# gzipping them burns CPU for no gain.
+
+	# The internal fetch endpoint is reachable only on the compose network.
+	handle {$API_PREFIX}/internal/* {
+		respond 404
+	}
+
+	handle {$API_PREFIX}/images* {
+		request_body {
+			max_size 32MB
+		}
+		reverse_proxy api-images:{$IMAGES_PORT} {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+			transport http {
+				# Converting a 25MB TIFF to WebP is not instant.
+				read_timeout 120s
+				write_timeout 120s
+			}
+		}
+	}
+
+	handle /health {
+		reverse_proxy api-images:{$IMAGES_PORT}
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}
