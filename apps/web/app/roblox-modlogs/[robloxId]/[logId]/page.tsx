@@ -8,7 +8,10 @@ import { ActionBadge, SeverityBadge, StatusBadge, Tag } from "@/components/badge
 import { PageHeader } from "@/components/chrome";
 import { ImageGrid } from "@/components/image-grid";
 import { LinkEmbedList } from "@/components/link-embed";
+import { RelatedAccounts } from "@/components/related-accounts";
 import { RevisionHistory } from "@/components/revision-history";
+import { ThreadPanel } from "@/components/thread";
+import { DiscordChip } from "@/components/discord-identity";
 
 /**
  * archive.domain.com/roblox-modlogs/[robloxId]/[16-char id]
@@ -136,6 +139,17 @@ export default async function ModlogPage({ params }: Props) {
                   </dl>
                 </section>
               ) : null}
+
+              {modlog.relatedAccounts?.length ? (
+                <div className="mt-8">
+                  <RelatedAccounts
+                    accounts={modlog.relatedAccounts}
+                    heading="Accounts named on this record"
+                  />
+                </div>
+              ) : null}
+
+              <ThreadPanel thread={modlog.thread} />
             </>
           )}
 
@@ -145,6 +159,13 @@ export default async function ModlogPage({ params }: Props) {
         {/* Provenance sidebar: who said this, when, and where it came from. */}
         <aside className="lg:sticky lg:top-20 lg:self-start">
           <dl className="card divide-y divide-line text-sm">
+            {/* The moderator who filed it comes first: on a moderation
+                record, "who says so" outranks every other fact here. */}
+            {modlog.thread?.author ? (
+              <Fact label="Filed by">
+                <DiscordChip user={modlog.thread.author} size="sm" />
+              </Fact>
+            ) : null}
             <Fact label="Occurred">
               {modlog.occurredAt ? formatDateTime(modlog.occurredAt) : "Not recorded"}
             </Fact>
@@ -166,6 +187,16 @@ export default async function ModlogPage({ params }: Props) {
                 modlog.source
               )}
             </Fact>
+            {modlog.ticketRef ? (
+              <Fact label="Ticket">
+                <span className="select-all font-mono text-xs">{modlog.ticketRef}</span>
+              </Fact>
+            ) : null}
+            {modlog.thread?.forumName ? (
+              <Fact label="Channel">
+                <span className="break-words">{modlog.thread.forumName}</span>
+              </Fact>
+            ) : null}
             <Fact label="Revision">{formatNumber(modlog.revision)}</Fact>
             <Fact label="Record ID">
               <span className="select-all font-mono text-xs">{modlog.id}</span>

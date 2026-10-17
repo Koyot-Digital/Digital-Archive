@@ -4,6 +4,8 @@ import type {
   ModlogAction,
   ModlogSeverity,
   RecordStatus,
+  SubjectRelation,
+  ThreadRole,
   UserRole,
 } from "@archive/shared";
 
@@ -119,6 +121,68 @@ export interface LinkEmbed {
   siteName: string | null;
 }
 
+/**
+ * A Discord account the archive knows about.
+ *
+ * `avatarUrl` is always a usable URL — the API substitutes Discord's own
+ * default avatar rather than returning null — so nothing here has to decide
+ * what to draw in a gap.
+ */
+export interface DiscordIdentity {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string;
+  bot: boolean;
+  resolvedFrom: "scrape" | "discord_api";
+  fetchedAt: string | null;
+}
+
+export interface ThreadParticipant extends DiscordIdentity {
+  role: ThreadRole;
+  messageCount: number;
+}
+
+export interface ThreadMessage {
+  messageId: string;
+  position: number;
+  html: string;
+  postedAt: string | null;
+  editedAt: string | null;
+  imageCount: number;
+  author: DiscordIdentity | null;
+}
+
+/** The source discussion behind a record. */
+export interface Thread {
+  postId: string | null;
+  guildId: string | null;
+  forumName: string | null;
+  url: string | null;
+  replyCount: number;
+  archived: boolean;
+  locked: boolean;
+  lastMessageAt: string | null;
+  author: DiscordIdentity | null;
+  participants: ThreadParticipant[];
+  messages: ThreadMessage[];
+}
+
+/** Another Roblox account grouped with this one. */
+export interface RelatedAccount {
+  robloxId: string;
+  username: string | null;
+  relation: SubjectRelation;
+  logCount: number;
+  archiveUrl: string;
+  assertedBy: string | null;
+}
+
+export interface Moderator extends DiscordIdentity {
+  recordCount: number;
+  lastRecordAt: string | null;
+}
+
 export interface Modlog {
   id: string;
   robloxId: string;
@@ -134,6 +198,8 @@ export interface Modlog {
   status: RecordStatus;
   revision: number;
   imageCount: number;
+  ticketRef: string | null;
+  threadReplyCount: number;
   createdAt: string;
   updatedAt: string;
   url: string;
@@ -143,6 +209,8 @@ export interface Modlog {
   linkEmbeds?: LinkEmbed[];
   subject?: Subject;
   thumbnail?: ArchiveImage | null;
+  thread?: Thread | null;
+  relatedAccounts?: RelatedAccount[];
 }
 
 export interface Page<T> {
@@ -233,9 +301,16 @@ export const api = {
     robloxId: string,
     params: { page?: number; limit?: number; action?: string; severity?: string; tag?: string; sort?: string } = {},
   ) =>
-    apiGet<Page<Modlog> & { subject: Subject }>(
+    apiGet<Page<Modlog> & { subject: Subject; relatedAccounts: RelatedAccount[] }>(
       `/roblox-modlogs/${robloxId}${qs(params)}`,
       { revalidate: 30 },
+    ),
+
+  /** Everyone who has filed a record, derived from the records themselves. */
+  moderators: (params: { limit?: number } = {}) =>
+    apiGet<{ moderators: Moderator[]; identityRefresh: boolean }>(
+      `/moderators${qs(params)}`,
+      { revalidate: 3600 },
     ),
 
   modlog: (robloxId: string, logId: string) =>

@@ -20,6 +20,8 @@ import type {
   ModlogAction,
   ModlogSeverity,
   RecordStatus,
+  SubjectRelation,
+  ThreadRole,
   UserRole,
 } from "@archive/shared";
 import type { LinkKind } from "@archive/shared";
@@ -161,6 +163,23 @@ export const modlogs = pgTable(
     revision: integer("revision").notNull().default(1),
     imageCount: smallint("image_count").notNull().default(0),
 
+    /* Discord forum provenance — null for records from any other source. */
+    discordPostId: varchar("discord_post_id", { length: 24 }),
+    discordGuildId: varchar("discord_guild_id", { length: 24 }),
+    discordForumId: varchar("discord_forum_id", { length: 24 }),
+    discordForumName: varchar("discord_forum_name", { length: 128 }),
+    /** The moderator who opened the thread. */
+    discordAuthorId: varchar("discord_author_id", { length: 24 }).references(
+      () => discordUsers.id,
+      { onDelete: "set null" },
+    ),
+    threadReplyCount: integer("thread_reply_count").notNull().default(0),
+    threadLastAt: timestamp("thread_last_at", { withTimezone: true }),
+    threadArchived: boolean("thread_archived").notNull().default(false),
+    threadLocked: boolean("thread_locked").notNull().default(false),
+    /** Support ticket reference as written, e.g. `#6066`. */
+    ticketRef: varchar("ticket_ref", { length: 32 }),
+
     createdBy: id16("created_by").references(() => users.id, { onDelete: "set null" }),
     updatedBy: id16("updated_by").references(() => users.id, { onDelete: "set null" }),
     ingestedBy: id16("ingested_by").references(() => apiKeys.id, { onDelete: "set null" }),
@@ -171,6 +190,8 @@ export const modlogs = pgTable(
   },
   (t) => ({
     sourceKey: uniqueIndex("modlogs_source_key").on(t.source, t.sourceId),
+    discordPostKey: uniqueIndex("modlogs_discord_post_key").on(t.discordPostId),
+    ticketIdx: index("modlogs_ticket_idx").on(t.ticketRef),
     subjectIdx: index("modlogs_subject_idx").on(t.robloxId, t.occurredAt),
     createdIdx: index("modlogs_created_idx").on(t.createdAt),
     occurredIdx: index("modlogs_occurred_idx").on(t.occurredAt),
@@ -267,6 +288,129 @@ export const links = pgTable(
   }),
 );
 
+/* ───────────────────────────── discord ───────────────────────────── */
+
+/**
+ * Discord identities seen on the archive's source threads.
+ *
+ * Both a join target and a cache: rows are seeded from whatever the scrape
+ * saw, then refreshed from the Discord API, which is why `resolvedFrom` and
+ * the failure counter exist. Eighteen moderators wrote five hundred records,
+ * so an avatar change should touch one row rather than five hundred.
+ */
+export const discordUsers = pgTable(
+  "discord_users",
+  {
+    /** Snowflake. Text, because that is what it is everywhere it is used. */
+    id: varchar("id", { length: 24 }).primaryKey(),
+    username: varchar("username", { length: 64 }),
+    globalName: varchar("global_name", { length: 64 }),
+    /** Avatar hash, kept so a CDN URL can be rebuilt at any size. */
+    avatar: varchar("avatar", { length: 128 }),
+    avatarUrl: varchar("avatar_url", { length: 2048 }),
+    bot: boolean("bot").notNull().default(false),
+
+    resolvedFrom: varchar("resolved_from", { length: 16 })
+      .$type<"scrape" | "discord_api">()
+      .notNull()
+      .default("scrape"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    fetchFailures: smallint("fetch_failures").notNull().default(0),
+    fetchError: text("fetch_error"),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    stalenessIdx: index("discord_users_staleness_idx").on(t.fetchedAt, t.fetchFailures),
+  }),
+);
+
+/** Who appeared on a record's thread, and how much they said. */
+export const modlogParticipants = pgTable(
+  "modlog_participants",
+  {
+    modlogId: id16("modlog_id")
+      .notNull()
+      .references(() => modlogs.id, { onDelete: "cascade" }),
+    discordId: varchar("discord_id", { length: 24 })
+      .notNull()
+      .references(() => discordUsers.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 16 }).$type<ThreadRole>().notNull().default("commenter"),
+    messageCount: integer("message_count").notNull().default(0),
+    firstAt: timestamp("first_at", { withTimezone: true }),
+    lastAt: timestamp("last_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pk: uniqueIndex("modlog_participants_pkey").on(t.modlogId, t.discordId),
+    userIdx: index("modlog_participants_user_idx").on(t.discordId, t.role),
+  }),
+);
+
+/**
+ * The discussion that followed a moderation log.
+ *
+ * Frequently where the appeal, the correction and the second opinion live, so
+ * dropping it would lose the part of the record a reader most wants. Stored
+ * pre-sanitised: it is user-written text from outside the archive.
+ */
+export const modlogMessages = pgTable(
+  "modlog_messages",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    modlogId: id16("modlog_id")
+      .notNull()
+      .references(() => modlogs.id, { onDelete: "cascade" }),
+    messageId: varchar("message_id", { length: 24 }).notNull(),
+    authorId: varchar("author_id", { length: 24 }).references(() => discordUsers.id, {
+      onDelete: "set null",
+    }),
+    position: smallint("position").notNull().default(0),
+    contentMd: text("content_md").notNull().default(""),
+    contentHtml: text("content_html").notNull().default(""),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    imageCount: smallint("image_count").notNull().default(0),
+    status: varchar("status", { length: 16 }).$type<RecordStatus>().notNull().default("published"),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    messageKey: uniqueIndex("modlog_messages_key").on(t.modlogId, t.messageId),
+    modlogIdx: index("modlog_messages_modlog_idx").on(t.modlogId, t.position),
+  }),
+);
+
+/**
+ * Alt / rename groupings between Roblox accounts.
+ *
+ * Both directions are stored, each worded from its own side, so either
+ * account's page can show the link without a UNION and without "A moved to B"
+ * rendering as "B moved to A".
+ */
+export const subjectRelations = pgTable(
+  "subject_relations",
+  {
+    robloxId: bigint("roblox_id", { mode: "bigint" })
+      .notNull()
+      .references(() => subjects.robloxId, { onDelete: "cascade" }),
+    relatedRobloxId: bigint("related_roblox_id", { mode: "bigint" })
+      .notNull()
+      .references(() => subjects.robloxId, { onDelete: "cascade" }),
+    relation: varchar("relation", { length: 16 })
+      .$type<SubjectRelation>()
+      .notNull()
+      .default("alt"),
+    /** The record that asserted the link, so a reader can check the claim. */
+    assertedBy: id16("asserted_by").references(() => modlogs.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pk: uniqueIndex("subject_relations_pkey").on(t.robloxId, t.relatedRobloxId),
+    relatedIdx: index("subject_relations_related_idx").on(t.relatedRobloxId),
+  }),
+);
+
 /* ───────────────────────────── oversight ───────────────────────────── */
 
 export const auditLog = pgTable(
@@ -316,3 +460,6 @@ export type DbSubject = typeof subjects.$inferSelect;
 export type DbModlog = typeof modlogs.$inferSelect;
 export type DbImage = typeof images.$inferSelect;
 export type DbLink = typeof links.$inferSelect;
+export type DbDiscordUser = typeof discordUsers.$inferSelect;
+export type DbModlogMessage = typeof modlogMessages.$inferSelect;
+export type DbSubjectRelation = typeof subjectRelations.$inferSelect;

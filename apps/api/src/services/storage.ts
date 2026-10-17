@@ -31,9 +31,31 @@ export function variantPath(id: string, variant: ImageVariant = "full"): string 
   return path;
 }
 
+const TMP_ROOT = join(ROOT, "tmp");
+
 export async function ensureStore(): Promise<void> {
   await mkdir(IMG_ROOT, { recursive: true });
-  await mkdir(join(ROOT, "tmp"), { recursive: true });
+  await mkdir(TMP_ROOT, { recursive: true });
+}
+
+/**
+ * Create the store at most once per process.
+ *
+ * The images service calls `ensureStore()` at boot, but it is not the only
+ * writer — an import script or a one-off backfill writes through the same
+ * path, and those have no boot sequence. Memoised rather than called on every
+ * write: an import converting a thousand attachments should not issue a
+ * thousand redundant mkdirs.
+ */
+let storeReady: Promise<void> | null = null;
+function ensureStoreOnce(): Promise<void> {
+  storeReady ??= ensureStore().catch((err) => {
+    // Do not cache a failure: a transient permissions problem should be
+    // retried by the next write rather than poisoning the process.
+    storeReady = null;
+    throw err;
+  });
+  return storeReady;
 }
 
 /**
@@ -45,9 +67,12 @@ export async function writeVariant(
   variant: ImageVariant,
   data: Buffer,
 ): Promise<string> {
+  await ensureStoreOnce();
   const target = variantPath(id, variant);
   await mkdir(dirname(target), { recursive: true });
-  const tmp = join(ROOT, "tmp", `${id}.${variant}.${process.pid}.tmp`);
+  // Same filesystem as the target, so the rename below is a true atomic
+  // replace rather than a copy that can be observed half-done.
+  const tmp = join(TMP_ROOT, `${id}.${variant}.${process.pid}.tmp`);
   await writeFile(tmp, data, { flag: "w" });
   await rename(tmp, target);
   return target;

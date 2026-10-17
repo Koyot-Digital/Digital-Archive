@@ -122,6 +122,23 @@
   .prose-archive > * + * {
     @apply mt-4;
   }
+  /*
+   * Thread replies, which are conversational rather than documentary: tighter
+   * leading and smaller type so a forty-reply discussion stays scannable and
+   * never competes with the record's own body for attention.
+   */
+  .prose-archive-tight {
+    @apply text-sm leading-6 text-fg/85;
+  }
+  .prose-archive-tight > * + * {
+    @apply mt-2;
+  }
+  .prose-archive-tight h1,
+  .prose-archive-tight h2,
+  .prose-archive-tight h3,
+  .prose-archive-tight h4 {
+    @apply mt-3 text-sm;
+  }
   .prose-archive h1,
   .prose-archive h2,
   .prose-archive h3,

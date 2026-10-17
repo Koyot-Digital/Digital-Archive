@@ -4,15 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:text": "tsx watch src/entry/text.ts",
-    "dev:images": "tsx watch src/entry/images.ts",
+    "dev:text": "tsx watch --env-file-if-exists=../../.env src/entry/text.ts",
+    "dev:images": "tsx watch --env-file-if-exists=../../.env src/entry/images.ts",
     "dev": "concurrently -n text,images -c cyan,magenta \"pnpm dev:text\" \"pnpm dev:images\"",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "start:text": "node dist/entry/text.js",
     "start:images": "node dist/entry/images.js",
-    "migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx src/scripts/seed.ts",
-    "apikey": "tsx src/scripts/create-api-key.ts",
+    "migrate": "tsx --env-file-if-exists=../../.env src/db/migrate.ts",
+    "seed": "tsx --env-file-if-exists=../../.env src/scripts/seed.ts",
+    "import:forum": "tsx --env-file-if-exists=../../.env src/scripts/import-forum-scrape.ts",
+    "apikey": "tsx --env-file-if-exists=../../.env src/scripts/create-api-key.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

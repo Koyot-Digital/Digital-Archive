@@ -8,6 +8,7 @@ import {
   modlogUpdateSchema,
   statusChangeSchema,
 } from "@archive/shared";
+import { notFound } from "../../lib/errors.js";
 import { recordAudit } from "../../services/audit.js";
 import { imageStats } from "../../services/images.js";
 import { unfurlLinksFor } from "../../services/links.js";
@@ -24,6 +25,13 @@ import {
   updateModlog,
 } from "../../services/modlogs.js";
 import { getSubject, listSubjects } from "../../services/subjects.js";
+import { getRelatedAccounts } from "../../services/threads.js";
+import {
+  getDiscordUser,
+  hasBotToken,
+  listModerators,
+  refreshStaleDiscordUsers,
+} from "../../services/discord-users.js";
 import { actorOf } from "../../auth/plugin.js";
 import {
   actorFor,
@@ -72,19 +80,26 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     return searchModlogs(query, visibility);
   });
 
-  /** Everything the archive holds about one Roblox account. */
+  /**
+   * Everything the archive holds about one Roblox account.
+   *
+   * `relatedAccounts` is part of this response rather than a separate call:
+   * an alt grouping is the first thing a reader needs in order to trust a
+   * page that says "no records" — the sanction may be filed under the main.
+   */
   app.get("/roblox-modlogs/:robloxId", async (req, reply) => {
     const { robloxId } = robloxIdParam.parse(req.params);
     const query = listModlogsQuerySchema.parse(req.query);
     const visibility = visibilityOf(req);
 
-    const [subject, page] = await Promise.all([
+    const [subject, page, relatedAccounts] = await Promise.all([
       getSubject(robloxId),
       listModlogsForSubject(robloxId, query, visibility),
+      getRelatedAccounts(robloxId),
     ]);
 
     setReadCache(reply, visibility, 60);
-    return { subject, ...page };
+    return { subject, relatedAccounts, ...page };
   });
 
   /** One modlog, with images, link embeds and the subject inlined. */
@@ -149,6 +164,78 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       })),
     };
   });
+
+  /* ─────────────────────── discord identities ─────────────────────── */
+
+  /**
+   * Who files records here, derived from the records themselves.
+   *
+   * Not a configured staff list: it is a fact about what is in the archive,
+   * so it cannot fall out of step with it. Cached for an hour — the set of
+   * people writing moderation logs changes on the scale of months.
+   */
+  app.get("/moderators", async (req, reply) => {
+    const { limit } = z
+      .object({ limit: z.coerce.number().int().min(1).max(500).default(100) })
+      .parse(req.query);
+    setReadCache(reply, visibilityOf(req), 3600);
+    const moderators = await listModerators(limit);
+    return { moderators, identityRefresh: hasBotToken() };
+  });
+
+  /** One Discord identity, as the archive currently holds it. */
+  app.get("/discord-users/:discordId", async (req, reply) => {
+    const { discordId } = z
+      .object({ discordId: z.string().regex(/^[0-9]{15,24}$/, "invalid Discord id") })
+      .parse(req.params);
+
+    const user = await getDiscordUser(discordId);
+    if (!user) throw notFound("Discord user");
+    setReadCache(reply, visibilityOf(req), 3600);
+    return { user };
+  });
+
+  /**
+   * Re-resolve the stalest identities against the Discord API.
+   *
+   * Admin-only and deliberately manual. Avatars and display names drift
+   * whether or not anything is being ingested, and the archive should be able
+   * to catch up without re-importing a scrape.
+   */
+  app.post(
+    "/discord-users/refresh",
+    { preHandler: app.requireRole("admin") },
+    async (req, reply) => {
+      const { limit } = z
+        .object({ limit: z.coerce.number().int().min(1).max(200).default(50) })
+        .parse(req.query);
+
+      const summary = await refreshStaleDiscordUsers(limit);
+      if (summary.tokenMissing) {
+        reply.status(503);
+        return {
+          error: {
+            code: "discord_token_missing",
+            message:
+              "DISCORD_BOT_TOKEN is not configured; the archive is using the " +
+              "usernames and avatars captured at scrape time",
+          },
+          summary,
+        };
+      }
+
+      await recordAudit({
+        ...actorOf(req),
+        action: "subject.update",
+        targetType: "discord_users",
+        targetId: "refresh",
+        metadata: { ...summary },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+      return { summary };
+    },
+  );
 
   /* ─────────────────────────── writes ─────────────────────────── */
 

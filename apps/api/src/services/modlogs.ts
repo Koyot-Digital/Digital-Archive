@@ -6,6 +6,7 @@ import {
   type ModlogAction,
   type ModlogSeverity,
   type RecordStatus,
+  type RelatedAccount,
 } from "@archive/shared";
 import { db } from "../db/client.js";
 import { images, links, modlogRevisions, modlogs, subjects } from "../db/schema.js";
@@ -15,6 +16,14 @@ import { renderBody, toExcerpt } from "./render.js";
 import { syncLinks } from "./links.js";
 import { upsertSubject } from "./subjects.js";
 import { toPublicSubject, type PublicSubject } from "./subjects.js";
+import {
+  getRelatedAccounts,
+  getThread,
+  syncRelatedAccounts,
+  syncThread,
+  type PublicRelatedAccount,
+  type PublicThread,
+} from "./threads.js";
 
 /**
  * Modlog read + write logic.
@@ -78,6 +87,10 @@ export interface PublicModlog {
   status: RecordStatus;
   revision: number;
   imageCount: number;
+  /** Support ticket reference as written, e.g. `#6066`. */
+  ticketRef: string | null;
+  /** Replies on the source thread. Zero for sources that have no thread. */
+  threadReplyCount: number;
   createdAt: string;
   updatedAt: string;
   url: string;
@@ -88,6 +101,10 @@ export interface PublicModlog {
   linkEmbeds?: PublicLink[];
   subject?: PublicSubject;
   thumbnail?: PublicImage | null;
+  /** The source discussion, when the record came from a Discord thread. */
+  thread?: PublicThread | null;
+  /** Alts and renames named on this record. */
+  relatedAccounts?: PublicRelatedAccount[];
 }
 
 type ModlogRow = typeof modlogs.$inferSelect;
@@ -141,6 +158,8 @@ function toSummary(row: ModlogRow): PublicModlog {
     status: row.status,
     revision: row.revision,
     imageCount: row.imageCount,
+    ticketRef: row.ticketRef,
+    threadReplyCount: row.threadReplyCount,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     url: `/roblox-modlogs/${robloxId}/${row.id}`,
@@ -349,7 +368,7 @@ export async function getModlog(
   if (!row) throw notFound("Modlog");
   if (expectedRobloxId && row.robloxId.toString() !== expectedRobloxId) throw notFound("Modlog");
 
-  const [imageRows, linkRows, subjectRow] = await Promise.all([
+  const [imageRows, linkRows, subjectRow, thread, relatedAccounts] = await Promise.all([
     db
       .select()
       .from(images)
@@ -367,6 +386,8 @@ export async function getModlog(
       .where(eq(subjects.robloxId, row.robloxId))
       .limit(1)
       .then((r) => r[0]),
+    getThread(id, { includeHidden: visibility === "moderator" }),
+    getRelatedAccounts(row.robloxId.toString()),
   ]);
 
   const withheld = row.status === "removed" && visibility === "public";
@@ -381,6 +402,10 @@ export async function getModlog(
     images: withheld ? [] : imageRows.map(toPublicImage),
     linkEmbeds: withheld ? [] : linkRows.map(toPublicLink),
     subject: subjectRow ? toPublicSubject(subjectRow) : undefined,
+    // A withheld record withholds its discussion too — the replies are the
+    // part most likely to contain what got the record taken down.
+    thread: withheld ? null : thread,
+    relatedAccounts,
   };
 }
 
@@ -444,6 +469,7 @@ function snapshotOf(row: ModlogRow): Record<string, unknown> {
     evidence: row.evidence,
     status: row.status,
     revision: row.revision,
+    ticketRef: row.ticketRef,
   };
 }
 
@@ -451,6 +477,13 @@ export interface UpsertOutcome {
   id: string;
   robloxId: string;
   outcome: "created" | "updated" | "skipped";
+  /**
+   * Discord accounts this record touched, handed back so the caller can
+   * refresh them against the Discord API *after* answering the request.
+   */
+  discordIds: string[];
+  relatedAccounts: number;
+  threadMessages: number;
 }
 
 /**
@@ -496,6 +529,8 @@ export async function upsertFromIngress(
       if (onConflict === "merge" && existing.updatedBy) {
         return { id: existing.id, robloxId: existing.robloxId.toString(), outcome: "skipped" as const };
       }
+      // Hand-edited records are caught above, so reaching here means the
+      // stored row is scraper-owned and the new scrape supersedes it.
 
       await tx.insert(modlogRevisions).values({
         modlogId: existing.id,
@@ -519,6 +554,7 @@ export async function upsertFromIngress(
           sourceUrl: record.sourceUrl ?? existing.sourceUrl,
           tags: record.tags.length ? record.tags : existing.tags,
           evidence: { ...existing.evidence, ...record.evidence },
+          ticketRef: record.ticketRef ?? existing.ticketRef,
           revision: existing.revision + 1,
           ingestedBy: actor.apiKeyId ?? existing.ingestedBy,
         })
@@ -543,16 +579,40 @@ export async function upsertFromIngress(
       sourceUrl: record.sourceUrl ?? null,
       tags: record.tags,
       evidence: record.evidence,
+      ticketRef: record.ticketRef ?? null,
       createdBy: actor.userId ?? null,
       ingestedBy: actor.apiKeyId ?? null,
     });
     return { id, robloxId: record.robloxId, outcome: "created" as const };
   });
 
-  if (outcome.outcome !== "skipped") {
-    await syncLinks(outcome.id, rendered.links);
+  if (outcome.outcome === "skipped") {
+    return { ...outcome, discordIds: [], relatedAccounts: 0, threadMessages: 0 };
   }
-  return outcome;
+
+  await syncLinks(outcome.id, rendered.links);
+
+  /**
+   * Thread and alt grouping are written outside the record's transaction.
+   *
+   * They are derived data: if either fails, the moderation record itself —
+   * the thing worth keeping — is already safely stored, and the next
+   * re-ingest of the same source will rebuild them. Rolling the record back
+   * because a reply failed to render would be the wrong trade.
+   */
+  const relatedAccounts = await syncRelatedAccounts(
+    outcome.id,
+    outcome.robloxId,
+    record.relatedAccounts,
+  );
+  const thread = record.thread ? await syncThread(outcome.id, record.thread) : null;
+
+  return {
+    ...outcome,
+    discordIds: thread?.discordIds ?? [],
+    relatedAccounts,
+    threadMessages: thread?.messages ?? 0,
+  };
 }
 
 /** Create a modlog by hand, from the web UI. */
@@ -573,6 +633,8 @@ export async function createModlog(
     sourceUrl?: string | undefined;
     tags: string[];
     evidence: Record<string, unknown>;
+    ticketRef?: string | undefined;
+    relatedAccounts?: RelatedAccount[] | undefined;
   },
   actor: Actor,
 ): Promise<PublicModlog> {
@@ -603,6 +665,7 @@ export async function createModlog(
       sourceUrl: input.sourceUrl ?? null,
       tags: input.tags,
       evidence: input.evidence,
+      ticketRef: input.ticketRef ?? null,
       createdBy: actor.userId ?? null,
     });
   } catch (err) {
@@ -613,6 +676,9 @@ export async function createModlog(
   }
 
   await syncLinks(id, rendered.links);
+  if (input.relatedAccounts?.length) {
+    await syncRelatedAccounts(id, input.robloxId, input.relatedAccounts);
+  }
   return getModlog(id, "moderator");
 }
 

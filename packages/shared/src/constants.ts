@@ -24,6 +24,40 @@ export type ModlogSeverity = (typeof MODLOG_SEVERITIES)[number];
 export const RECORD_STATUSES = ["published", "hidden", "removed"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
+/**
+ * How one Roblox account in the archive relates to another.
+ *
+ * Moderation threads routinely name several accounts at once — a main and its
+ * alts, or an account that was abandoned for a new one. The relation is kept
+ * so the archive can group them without claiming they are the same row.
+ */
+export const SUBJECT_RELATIONS = ["alt", "successor", "predecessor", "related"] as const;
+export type SubjectRelation = (typeof SUBJECT_RELATIONS)[number];
+
+export const RELATION_LABELS: Record<SubjectRelation, string> = {
+  alt: "Alternate account",
+  successor: "Moved to",
+  predecessor: "Moved from",
+  related: "Related account",
+};
+
+/**
+ * The relation as it reads from the other account's page.
+ *
+ * Groupings are stored in both directions so either account's page can show
+ * the link, and "A moved to B" must not render as "B moved to A".
+ */
+export const INVERSE_RELATION: Record<SubjectRelation, SubjectRelation> = {
+  alt: "alt",
+  successor: "predecessor",
+  predecessor: "successor",
+  related: "related",
+};
+
+/** Why a Discord account appears on a record's thread. */
+export const THREAD_ROLES = ["author", "commenter"] as const;
+export type ThreadRole = (typeof THREAD_ROLES)[number];
+
 export const USER_ROLES = ["viewer", "moderator", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 

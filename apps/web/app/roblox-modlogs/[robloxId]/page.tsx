@@ -7,6 +7,7 @@ import { cx, formatDate, formatNumber } from "@/lib/format";
 import { PageHeader, SubjectHeader } from "@/components/chrome";
 import { ModlogList } from "@/components/modlog-card";
 import { Pagination } from "@/components/pagination";
+import { RelatedAccounts } from "@/components/related-accounts";
 
 /**
  * archive.domain.com/roblox-modlogs/[robloxId]
@@ -93,8 +94,11 @@ export default async function SubjectPage({ params, searchParams }: Props) {
         }
       />
 
-      <div className="mb-6">
+      <div className="mb-6 space-y-4">
         <SubjectHeader subject={subject} />
+        {/* Before the record list, not after: on an alt's page this panel is
+            the explanation for why the list below may be empty. */}
+        <RelatedAccounts accounts={data.relatedAccounts} />
       </div>
 
       {/* Filters are plain links so the whole page works without JavaScript. */}
@@ -117,7 +121,9 @@ export default async function SubjectPage({ params, searchParams }: Props) {
           empty={
             filtered
               ? "No records match these filters."
-              : "No records are archived for this account."
+              : data.relatedAccounts.length
+                ? "No records are filed under this account — see the grouped accounts above."
+                : "No records are archived for this account."
           }
         />
         <Pagination

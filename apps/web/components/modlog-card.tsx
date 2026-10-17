@@ -51,6 +51,17 @@ export function ModlogCard({ modlog, showSubject = false }: { modlog: Modlog; sh
                 {formatNumber(modlog.imageCount)} image{modlog.imageCount === 1 ? "" : "s"}
               </span>
             ) : null}
+            {/* A contested record is worth spotting from the list: a long
+                thread usually means an appeal or a disagreement. */}
+            {modlog.threadReplyCount > 0 ? (
+              <span className="text-2xs text-faint">
+                {formatNumber(modlog.threadReplyCount)} repl
+                {modlog.threadReplyCount === 1 ? "y" : "ies"}
+              </span>
+            ) : null}
+            {modlog.ticketRef ? (
+              <span className="font-mono text-2xs text-faint">{modlog.ticketRef}</span>
+            ) : null}
           </div>
 
           <h3 className="mt-2 truncate text-[0.9375rem] font-medium text-fg group-hover:text-accent">

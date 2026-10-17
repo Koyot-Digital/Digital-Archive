@@ -45,6 +45,10 @@ x-api-env: &api-env
   ADMIN_DISCORD_IDS: ${ADMIN_DISCORD_IDS:-}
   MODERATOR_DISCORD_IDS: ${MODERATOR_DISCORD_IDS:-}
   SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-14}
+  # Optional: refreshes the Discord identities on scraped records. Without it
+  # the archive keeps the names and avatars captured at scrape time.
+  DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+  DISCORD_USER_TTL_HOURS: ${DISCORD_USER_TTL_HOURS:-168}
   STORAGE_ROOT: /data/storage
   IMAGE_MAX_UPLOAD_BYTES: ${IMAGE_MAX_UPLOAD_BYTES:-26214400}
   IMAGE_MAX_EDGE: ${IMAGE_MAX_EDGE:-2400}

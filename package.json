@@ -15,6 +15,7 @@
     "lint": "pnpm -r lint",
     "migrate": "pnpm --filter @archive/api migrate",
     "seed": "pnpm --filter @archive/api seed",
+    "import:forum": "pnpm --filter @archive/api import:forum",
     "apikey": "pnpm --filter @archive/api apikey",
     "up": "docker compose up -d --build",
     "down": "docker compose down",

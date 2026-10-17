@@ -19,11 +19,19 @@ const READ_ENDPOINTS: [string, string][] = [
   ["GET /subjects?q=&sort=&page=", "Accounts with at least one published record."],
   ["GET /modlogs?action=&severity=&page=", "All published records, newest first."],
   ["GET /search?q=", "Full-text search. Supports quoted phrases and -exclusions."],
-  ["GET /roblox-modlogs/:robloxId", "One account's records, with the subject inlined."],
-  ["GET /roblox-modlogs/:robloxId/:logId", "One record with images, link embeds and subject."],
+  [
+    "GET /roblox-modlogs/:robloxId",
+    "One account's records, with the subject and its grouped accounts inlined.",
+  ],
+  [
+    "GET /roblox-modlogs/:robloxId/:logId",
+    "One record with images, link embeds, subject, grouped accounts and the source thread.",
+  ],
   ["GET /roblox-modlogs/:robloxId/:logId/:imageId", "Image metadata plus its siblings."],
   ["GET /modlogs/:id", "Flat record lookup by id."],
   ["GET /modlogs/:id/revisions", "Edit history, newest revision first."],
+  ["GET /moderators", "Who files records here, counted from the records themselves."],
+  ["GET /discord-users/:discordId", "One Discord identity as the archive holds it."],
 ];
 
 const IMAGE_ENDPOINTS: [string, string][] = [
@@ -126,6 +134,63 @@ images ${PUBLIC_API_BASE}/images/`}
           Check a credential without writing:{" "}
           <code className="font-mono text-xs">GET /ingress/whoami</code>.
         </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-faint">
+          Discord forum scrapes
+        </h2>
+        <p className="mb-3 text-sm leading-6 text-muted">
+          Forum threads go in unchanged, at{" "}
+          <code className="font-mono text-xs">/ingress/discord-forum</code>, and are mapped to
+          records server-side. Reading one of these threads means knowing that the subject is the
+          first Roblox id in the title, that{" "}
+          <code className="font-mono text-xs">;tban Name 3d reason</code> is a three-day
+          suspension, and that a struck-through command followed by a{" "}
+          <code className="font-mono text-xs">;pban</code> is an escalation rather than two
+          sanctions. Those rules belong to the archive, not to the scraper.
+        </p>
+        <pre className="overflow-x-auto rounded-card border border-line bg-raised p-4 font-mono text-xs leading-6">
+          {`curl -X POST ${PUBLIC_API_BASE}/ingress/discord-forum \\
+  -H "Authorization: Bearer da_your_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "batchId": "forum-2026-10-17",
+    "onConflict": "merge",
+    "posts": [{
+      "post_id": "1533545415213846760",
+      "title": "wojtek3441 (2555684412) (#6066)",
+      "body": ";tban wojtek3441 2d Intentional disruption of gameplay",
+      "url": "https://discord.com/channels/…",
+      "posted_at": "2026-08-02T18:41:58.883Z",
+      "tags": ["Appealable"],
+      "author":  { "id": "749042365448323113", "username": "surup9670" },
+      "images":  [{ "url": "https://cdn.discordapp.com/attachments/…" }],
+      "replies": [{ "message_id": "…", "content": "…",
+                    "author": { "id": "…", "username": "…" } }]
+    }]
+  }'`}
+        </pre>
+        <ul className="mt-3 space-y-1.5 text-xs leading-5 text-muted">
+          <li>
+            <strong className="text-fg">One thread is one record</strong> — a sanction announced
+            against four alts stays one event, filed under the first account named, with the others
+            stored as grouped accounts.
+          </li>
+          <li>
+            <strong className="text-fg">Dedupe</strong> — on the post id, so re-scraping a thread
+            updates its record and its replies instead of creating a twin.
+          </li>
+          <li>
+            <strong className="text-fg">unmapped</strong> — a thread whose title names no Roblox id
+            has no subject to be filed under. It is returned with a reason rather than failing the
+            batch. A batch where nothing maps returns 422.
+          </li>
+          <li>
+            <strong className="text-fg">Limits</strong> — 500 threads and 64MB per batch; threads
+            carry their whole reply history.
+          </li>
+        </ul>
       </section>
 
       <section>

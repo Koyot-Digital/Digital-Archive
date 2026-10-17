@@ -35,12 +35,17 @@ archive.domain.com/roblox-modlogs/<robloxId>/<16-char id>           one record
 archive.domain.com/roblox-modlogs/<robloxId>/<16-char id>/<img id>  one piece of evidence
 ```
 
+```
+archive.domain.com/moderators                                       who files records here
+```
+
 API:
 
 ```
-api.domain.com/digitalarchive/v1/ingress            POST   scraper entry point
-api.domain.com/digitalarchive/v1/images/<id>.webp   GET    image bytes
-api.domain.com/digitalarchive/v1/images             POST   upload
+api.domain.com/digitalarchive/v1/ingress               POST   archive records
+api.domain.com/digitalarchive/v1/ingress/discord-forum POST   raw forum threads
+api.domain.com/digitalarchive/v1/images/<id>.webp      GET    image bytes
+api.domain.com/digitalarchive/v1/images                POST   upload
 ```
 
 Full endpoint list: [`docs/API.md`](docs/API.md), or `/api-docs` on the running
@@ -130,6 +135,54 @@ Check a credential without writing anything:
 
 A worked example scraper client is in [`docs/SCRAPER.md`](docs/SCRAPER.md).
 
+### Discord forum scrapes
+
+The archive's first real source is a Discord forum channel, where one thread
+is one moderation event. Those threads go in **unchanged**:
+
+```sh
+curl -X POST https://api.domain.com/digitalarchive/v1/ingress/discord-forum \
+  -H "Authorization: Bearer da_…" -H "Content-Type: application/json" \
+  --data-binary @scrape-batch.json
+```
+
+…or, for a file already on disk, skipping HTTP entirely:
+
+```sh
+pnpm import:forum ./roblox-modlogs-….jsonl --images
+```
+
+**The mapping happens server-side, on purpose.** Reading one of these threads
+means knowing that the subject is the first Roblox id in the title, that
+`;tban Name 3d reason` is a three-day suspension, that a `~~struck-through~~`
+command followed by a `;pban` is an *escalation* rather than two sanctions,
+and that `A (1) --> B (2)` names one account that moved rather than two that
+offended. Those rules are the archive's reading of its own source and they
+change; keeping them in the API means a re-parse is one deploy, and the
+scraper can never hold a second, quietly different interpretation.
+
+What comes out of one thread:
+
+| From the thread | Becomes |
+| --- | --- |
+| `wojtek3441 (2555684412) (#6066)` | subject `2555684412`, ticket `#6066` |
+| `;tban wojtek3441 2d Intentional disruption…` | `temp_ban`, `medium`, 2 days, that reason |
+| `MRLAZY295 (…) mrlazy296 (…) All Alts` | one record + three grouped accounts |
+| the 21 replies | the record's thread, with avatars and names |
+| the attachments | WebP evidence, as with any other image |
+
+A thread whose title names no Roblox id has no subject to be filed under, so
+it comes back under `unmapped` with a reason rather than failing the batch or
+being silently dropped.
+
+Everything on the thread is attributed. `DISCORD_BOT_TOKEN` is optional —
+without it the archive shows the usernames and avatars the scrape captured and
+labels them *as scraped*; with it, identities are refreshed from
+`GET /users/{id}` after the response is sent, cached for
+`DISCORD_USER_TTL_HOURS`, and re-resolvable on demand with
+`POST /discord-users/refresh`. Either way a record always renders, and the UI
+never passes off a months-old scraped name as current.
+
 ---
 
 ## Images
@@ -215,11 +268,19 @@ apps/api/            one codebase, two entrypoints
   src/app/images.ts    → api-images  WebP serving and uploads
   src/db/migrations/   hand-written SQL (triggers, partial indexes, the rule)
   src/services/        modlogs · images · links · audit · render
+                       threads · discord-users
+  src/scripts/         migrate · seed · apikey · import-forum-scrape
 apps/web/            Next.js 15 App Router, server components
 packages/shared/     ids, zod schemas, link classification — used by both
+                     discord.ts      forum title + command parsing
+                     forum-record.ts forum thread → archive record
 infra/caddy/         internal reverse proxy, one listener per tunnel
 infra/cloudflared/   tunnel + edge cache setup
 ```
+
+Parsing lives in `packages/shared` rather than in the API because the web app
+renders the same vocabulary the parser produces — relations, thread roles,
+severity from ban length — and two copies of that vocabulary would drift.
 
 Both API services run from the same image with different commands. They share
 the schema, the services layer and the security stack; what differs is which

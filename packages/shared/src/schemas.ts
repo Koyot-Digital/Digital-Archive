@@ -3,10 +3,13 @@ import {
   MODLOG_ACTIONS,
   MODLOG_SEVERITIES,
   RECORD_STATUSES,
+  SUBJECT_RELATIONS,
+  THREAD_ROLES,
   USER_ROLES,
   API_KEY_SCOPES,
 } from "./constants.js";
 import { ID_PATTERN, ROBLOX_ID_PATTERN } from "./ids.js";
+import { discordForumPostSchema, zSnowflake } from "./discord.js";
 
 /* ───────────────────────────── primitives ───────────────────────────── */
 
@@ -62,8 +65,78 @@ export const zEvidence = z
 export const zAction = z.enum(MODLOG_ACTIONS);
 export const zSeverity = z.enum(MODLOG_SEVERITIES);
 export const zStatus = z.enum(RECORD_STATUSES);
+export const zRelation = z.enum(SUBJECT_RELATIONS);
+export const zThreadRole = z.enum(THREAD_ROLES);
 export const zRole = z.enum(USER_ROLES);
 export const zScope = z.enum(API_KEY_SCOPES);
+
+/* ──────────────────────── discord thread context ──────────────────────── */
+
+/**
+ * A Discord account seen on a record's thread.
+ *
+ * The scraper already knows the username and avatar it saw, but those are a
+ * *hint*, not the truth: a display name changes, an avatar is replaced, and a
+ * scrape from August is stale by October. The API stores them so a record is
+ * never blank, then refreshes them from the Discord API, which is why every
+ * field but the id is optional here.
+ */
+export const discordUserHintSchema = z.object({
+  id: zSnowflake,
+  username: z.string().trim().min(1).max(64).optional(),
+  displayName: z.string().trim().min(1).max(64).optional(),
+  avatarUrl: z.string().url().max(2048).optional(),
+  bot: z.boolean().default(false),
+  role: zThreadRole.default("commenter"),
+});
+export type DiscordUserHint = z.infer<typeof discordUserHintSchema>;
+
+/** One message in the discussion that followed a moderation log. */
+export const threadMessageSchema = z.object({
+  messageId: zSnowflake,
+  authorId: zSnowflake.optional(),
+  content: z.string().max(8000).default(""),
+  postedAt: zTimestamp.optional(),
+  editedAt: zTimestamp.optional(),
+  /** Attachments on this message, fetched and converted like any evidence. */
+  imageUrls: z.array(z.string().url().max(2048)).max(16).default([]),
+});
+export type ThreadMessage = z.infer<typeof threadMessageSchema>;
+
+/**
+ * Where a record came from, when the source was a Discord forum thread.
+ *
+ * Kept as its own object rather than flattened into the record so that
+ * `source: "discord-forum"` records carry provenance a reader can follow back
+ * to the original thread, while records from other scrapers simply omit it.
+ */
+export const discordThreadSchema = z.object({
+  guildId: zSnowflake.optional(),
+  forumId: zSnowflake.optional(),
+  forumName: z.string().trim().max(128).optional(),
+  postId: zSnowflake,
+  url: z.string().url().max(2048).optional(),
+  /** The moderator who opened the thread. */
+  authorId: zSnowflake.optional(),
+  archived: z.boolean().default(false),
+  locked: z.boolean().default(false),
+  pinned: z.boolean().default(false),
+  replyCount: z.number().int().nonnegative().max(100_000).default(0),
+  createdAt: zTimestamp.optional(),
+  lastMessageAt: zTimestamp.optional(),
+  archivedAt: zTimestamp.optional(),
+  users: z.array(discordUserHintSchema).max(200).default([]),
+  messages: z.array(threadMessageSchema).max(400).default([]),
+});
+export type DiscordThread = z.infer<typeof discordThreadSchema>;
+
+/** Another Roblox account named on the same record. */
+export const relatedAccountSchema = z.object({
+  robloxId: zRobloxId,
+  username: z.string().trim().min(1).max(64).optional(),
+  relation: zRelation.default("alt"),
+});
+export type RelatedAccount = z.infer<typeof relatedAccountSchema>;
 
 /* ───────────────────────────── ingress ───────────────────────────── */
 
@@ -98,6 +171,20 @@ export const ingressRecordSchema = z.object({
   imageUrls: z.array(z.string().url().max(2048)).max(24).default([]),
   /** IDs of images already uploaded through the images API. */
   imageIds: z.array(zId).max(24).default([]),
+
+  /**
+   * Other accounts named on the same record — alts, or a successor account.
+   *
+   * These are deliberately *not* extra records: one sanction announced for
+   * four alts is one event. The archive stores the grouping so every alt's
+   * page can point at it, and leaves the record itself filed under the
+   * primary account.
+   */
+  relatedAccounts: z.array(relatedAccountSchema).max(24).default([]),
+  /** Support-ticket reference, when the source named one. */
+  ticketRef: z.string().trim().max(32).optional(),
+  /** Discord provenance, for records scraped out of a forum channel. */
+  thread: discordThreadSchema.optional(),
 });
 export type IngressRecord = z.infer<typeof ingressRecordSchema>;
 
@@ -110,6 +197,22 @@ export const ingressBatchSchema = z.object({
   records: z.array(ingressRecordSchema).min(1).max(500),
 });
 export type IngressBatch = z.infer<typeof ingressBatchSchema>;
+
+/**
+ * The raw-scrape entry point.
+ *
+ * Takes Discord forum threads exactly as the scraper emits them and maps them
+ * server-side. The alternative — making the scraper build archive records —
+ * would put the title-parsing and command-parsing rules in a second codebase
+ * and guarantee the two drift apart.
+ */
+export const forumIngressBatchSchema = z.object({
+  batchId: z.string().trim().min(8).max(64).optional(),
+  onConflict: z.enum(["skip", "merge", "replace"]).default("merge"),
+  dryRun: z.boolean().default(false),
+  posts: z.array(discordForumPostSchema).min(1).max(500),
+});
+export type ForumIngressBatch = z.infer<typeof forumIngressBatchSchema>;
 
 export const ingressResultSchema = z.object({
   batchId: z.string(),
@@ -127,13 +230,21 @@ export const ingressResultSchema = z.object({
   errors: z.array(
     z.object({ index: z.number(), robloxId: z.string().nullable(), message: z.string() }),
   ),
+  /**
+   * Threads the mapper could not place — almost always a title with no Roblox
+   * id in it. Reported rather than silently dropped so the scrape can be
+   * corrected at the source.
+   */
+  unmapped: z
+    .array(z.object({ index: z.number(), sourceId: z.string(), title: z.string(), reason: z.string() }))
+    .default([]),
 });
 export type IngressResult = z.infer<typeof ingressResultSchema>;
 
 /* ───────────────────────── modlog read/write ───────────────────────── */
 
 export const modlogCreateSchema = ingressRecordSchema
-  .omit({ source: true, sourceId: true, imageUrls: true })
+  .omit({ source: true, sourceId: true, imageUrls: true, thread: true })
   .extend({
     source: z.string().trim().min(1).max(64).default("manual"),
     sourceId: z.string().trim().min(1).max(200).optional(),

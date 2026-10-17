@@ -62,6 +62,20 @@ const envSchema = z
     MODERATOR_DISCORD_IDS: csv,
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(14),
 
+    /**
+     * Bot token used to resolve the Discord accounts that appear on scraped
+     * records — the moderator who filed a log, and whoever argued about it.
+     *
+     * Separate from the OAuth credentials above and genuinely optional: the
+     * scrape already carries the usernames and avatars it saw, so without a
+     * token the archive renders those and simply never refreshes them. The
+     * `identify` OAuth scope cannot stand in for this, because it only ever
+     * describes the signed-in user, never a third party.
+     */
+    DISCORD_BOT_TOKEN: z.string().default(""),
+    /** How long a resolved Discord identity is trusted before re-fetching. */
+    DISCORD_USER_TTL_HOURS: z.coerce.number().int().min(1).max(8760).default(168),
+
     STORAGE_ROOT: z.string().default("./storage"),
     IMAGE_MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).default(26_214_400),
     IMAGE_MAX_EDGE: z.coerce.number().int().min(320).max(8192).default(2400),

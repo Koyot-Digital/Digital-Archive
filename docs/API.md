@@ -86,14 +86,59 @@ rather than an error.
 One account's records, with the subject object inlined. Same filters as
 `/modlogs`. Mirrors the public web URL.
 
+Also returns `relatedAccounts`: alts and renames named on this account's
+records, in both directions. Read this before concluding that an empty list
+means an unsanctioned account — one sanction announced against four alts is
+stored as **one** record, filed under the first account named, so the other
+three legitimately show zero records of their own.
+
+```json
+"relatedAccounts": [
+  { "robloxId": "7511229161", "username": "mrlazy296", "relation": "alt",
+    "logCount": 0, "archiveUrl": "/roblox-modlogs/7511229161",
+    "assertedBy": "q4m7x2b9ktp0rsvw" }
+]
+```
+
+`relation` is one of `alt`, `successor` (this account moved to that one),
+`predecessor` (the reverse) or `related` (named together, relationship not
+stated). `assertedBy` is the record that made the claim, so it can be checked.
+
 ### `GET /roblox-modlogs/:robloxId/:logId`
 
 One record, with `body.markdown`, `body.html` (pre-sanitised), `images`,
-`linkEmbeds`, `evidence` and `subject`.
+`linkEmbeds`, `evidence`, `subject`, `relatedAccounts` and `thread`.
 
 The `robloxId` is verified against the record, so the route cannot be used to
 render a log under the wrong subject. A `removed` record returns its shell —
-id, title, status, history — with the body, evidence and images withheld.
+id, title, status, history — with the body, evidence, images **and thread**
+withheld.
+
+`thread` is non-null only for records scraped from a Discord forum. It
+carries the discussion that followed the log, which on these sources is where
+the appeal, the correction and the decision to escalate actually live:
+
+```json
+"thread": {
+  "postId": "1533545415213846760",
+  "forumName": "🔑｜roblox-modlogs",
+  "url": "https://discord.com/channels/…",
+  "replyCount": 21, "archived": true, "locked": false,
+  "author":       { "id": "749042365448323113", "username": "surup9670",
+                    "displayName": "kahve", "avatarUrl": "https://cdn.discordapp.com/…",
+                    "bot": false, "resolvedFrom": "scrape", "fetchedAt": null },
+  "participants": [ { "…": "…", "role": "author", "messageCount": 4 } ],
+  "messages":     [ { "messageId": "…", "position": 0, "html": "…",
+                      "postedAt": "…", "editedAt": null, "imageCount": 0,
+                      "author": { "…": "…" } } ]
+}
+```
+
+`avatarUrl` is never null — Discord's own default avatar is substituted — so
+a client never has to decide what to draw in a gap. `resolvedFrom` says where
+the name and avatar came from: `discord_api` is authoritative as of
+`fetchedAt`, `scrape` is what the thread looked like when it was captured and
+has not been confirmed since.
 
 ### `GET /roblox-modlogs/:robloxId/:logId/:imageId`
 
@@ -109,19 +154,91 @@ Flat lookup when only the record id is known.
 Edit history, newest revision first. Each entry is the state *before* that
 edit, plus the reason the editor gave.
 
+### `GET /moderators`
+
+Everyone who has filed a record, with how many they filed and when they last
+did. Derived from the records rather than from a configured list, so it cannot
+drift out of step with the archive's contents.
+
+`identityRefresh` reports whether `DISCORD_BOT_TOKEN` is set. When it is
+false, every identity in the response is `resolvedFrom: "scrape"` and will
+stay that way.
+
+### `GET /discord-users/:discordId`
+
+One Discord identity as the archive currently holds it. 404 if the archive has
+never seen that account — this is a cache of accounts that appear on records,
+not a proxy for Discord's API.
+
 ---
 
 ## Writes
 
 ### `POST /ingress`
 
-The scraper entry point. Scope `ingress:write`. See
-[`SCRAPER.md`](SCRAPER.md) for the full contract.
+The scraper entry point, for a client that already builds archive records.
+Scope `ingress:write`. See [`SCRAPER.md`](SCRAPER.md) for the full contract.
+
+### `POST /ingress/discord-forum`
+
+Discord forum threads **verbatim**, exactly as the scraper emits them. Scope
+`ingress:write`. Body limit 64MB, because a batch of threads carries their
+whole reply history.
+
+```json
+{
+  "batchId": "forum-2026-10-17",
+  "onConflict": "merge",
+  "posts": [ { "post_id": "…", "title": "wojtek3441 (2555684412) (#6066)", "…": "…" } ]
+}
+```
+
+The mapping happens server-side: which Roblox account the thread is about
+(the first id in the title), what sanction the body records (`;tban … 3d …`),
+which other accounts it groups, and who took part. Those rules are the
+archive's interpretation of its own source and they change — keeping them here
+means a re-parse is a deploy of one service, and the scraper can never hold a
+second, divergent reading of the same title.
+
+Everything `POST /ingress` guarantees applies: idempotent per `batchId`,
+partial success, deduplicated on `source` + `sourceId` (here, the post id).
+One addition — a thread the mapper cannot place does **not** fail the batch:
+
+```json
+"unmapped": [
+  { "index": 19, "sourceId": "1536…", "title": "dap123francais (all alt accounts) (Appeal-#6098)",
+    "reason": "no Roblox id in the thread title — the subject cannot be identified, …" }
+]
+```
+
+A batch where *nothing* mapped returns `422 nothing_mappable` rather than a
+200 reporting no work.
+
+For a file on disk, skip HTTP entirely:
+
+```sh
+pnpm import:forum /path/to/scrape.jsonl [--conflict merge] [--limit n] [--dry-run] [--images]
+```
+
+Same parsing, mapping and persistence code as the endpoint. `--images` is off
+by default because Discord attachment URLs are signed and expire, so a stale
+scrape mostly 404s.
 
 ### `GET /ingress/whoami`
 
 Confirms a credential, its scopes and its rate budget without writing. Point
-cron monitoring here.
+cron monitoring here. Also reports `discord.identityRefresh` — whether a bot
+token is configured — and both ingress body limits.
+
+### `POST /discord-users/refresh`
+
+Re-resolves the stalest Discord identities against the Discord API. Role
+`admin`. `?limit=` (1–200, default 50). Returns `503
+discord_token_missing` when no bot token is configured.
+
+Manual on purpose: avatars and display names drift whether or not anything is
+being ingested, and the archive should be able to catch up without
+re-importing a scrape.
 
 ### `POST /modlogs`
 

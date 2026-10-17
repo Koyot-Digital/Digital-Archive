@@ -35,6 +35,57 @@ A record:
 | `evidence` | | Arbitrary JSON object, ≤ 64KB serialised. |
 | `imageUrls` | | ≤ 24. Fetched, converted to WebP and attached after the response. |
 | `imageIds` | | ≤ 24 already-uploaded image ids to attach. |
+| `relatedAccounts` | | ≤ 24 other accounts this record names: `{ robloxId, username?, relation }` where relation is `alt` `successor` `predecessor` `related`. |
+| `ticketRef` | | Support ticket reference, ≤ 32 chars. Searchable. |
+| `thread` | | The source discussion. See below. |
+
+### Grouping accounts instead of duplicating records
+
+One sanction announced against an account *and its three alts* is one event.
+Send it as one record with three `relatedAccounts`, not as four records.
+
+The archive creates a `subjects` row for each named account — with no records
+of its own — and links it in both directions, so visiting any of the four
+accounts lands on a page that points at the record. Sending four copies
+instead would quadruple every count the archive reports and make a single ban
+look like a pattern of them.
+
+### Sending a discussion
+
+If your source has a conversation attached — a forum thread, a ticket, a
+review queue — send it as `thread`, because on most moderation sources that
+is where the appeal, the correction and the second opinion live:
+
+```jsonc
+"thread": {
+  "postId": "1533545415213846760",   // required: identifies the discussion
+  "url": "https://…", "forumName": "…", "authorId": "749042365448323113",
+  "replyCount": 21, "archived": true, "locked": false,
+  "users": [                          // ≤ 200; id required, rest is a hint
+    { "id": "749042365448323113", "username": "surup9670",
+      "displayName": "kahve", "avatarUrl": "https://…", "role": "author" }
+  ],
+  "messages": [                       // ≤ 400, in order
+    { "messageId": "…", "authorId": "…", "content": "markdown",
+      "postedAt": "…", "imageUrls": ["https://…"] }
+  ]
+}
+```
+
+`users` entries are **hints**, not assertions: the archive stores them so a
+record always renders, then refreshes them from the Discord API when a bot
+token is configured, and labels them *as scraped* until it has. A blank field
+in a hint never blanks a value already known.
+
+Re-sending a thread replaces its stored messages — a reply deleted upstream
+disappears here too, because the thread is a copy and not a record of its own.
+Participant reply counts are recomputed from the messages that actually
+arrived, so they always match what the archive holds.
+
+> **Scraping a Discord forum?** Do not build any of the above. Send the
+> threads verbatim to `POST /ingress/discord-forum` and the archive maps them
+> itself — title to subject, `;tban … 3d …` to action and severity, alts to
+> groupings, replies to the thread. See [`API.md`](API.md#post-ingressdiscord-forum).
 
 ### Conflict policy
 
@@ -57,13 +108,18 @@ Dedupe is on `source` + `sourceId`.
   "replayed": false,
   "counts": { "received": 50, "created": 12, "updated": 31, "skipped": 7, "failed": 0, "imagesQueued": 18 },
   "created": [{ "id": "7f3kq2m8xhv40bre", "robloxId": "156", "url": "https://archive.domain.com/..." }],
-  "errors": []
+  "errors": [],
+  "unmapped": []
 }
 ```
 
 Status codes: `200` normally, `207` if every record failed, `401`/`403` for
 credential problems, `422` with per-field `details` for a schema failure,
 `429` with `retryAfterMs` when rate limited.
+
+`unmapped` is always `[]` here — it only fills in on
+`/ingress/discord-forum`, where the archive does the mapping and can
+legitimately fail to find a subject in a thread title.
 
 `"replayed": true` means this `batchId` was already processed — the response is
 the original result, nothing was written. That is the behaviour you want from a

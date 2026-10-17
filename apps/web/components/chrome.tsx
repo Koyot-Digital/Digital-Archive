@@ -26,6 +26,7 @@ export function Header({ viewer }: { viewer: Viewer }) {
         <nav className="hidden items-center gap-1 md:flex">
           <NavLink href="/subjects">Subjects</NavLink>
           <NavLink href="/modlogs">All records</NavLink>
+          <NavLink href="/moderators">Moderators</NavLink>
           {isStaff ? <NavLink href="/moderation">Moderation</NavLink> : null}
           <NavLink href="/about">About</NavLink>
         </nav>
