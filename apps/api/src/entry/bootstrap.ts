@@ -25,7 +25,7 @@ export async function serve(
       app.log.fatal(
         { err: message },
         /ECONNREFUSED|ENOTFOUND|ETIMEDOUT/.test(message)
-          ? "cannot reach Postgres — check DATABASE_URL and that the database is running"
+          ? "cannot reach Postgres - check DATABASE_URL and that the database is running"
           : "migrations failed",
       );
       await closeDb().catch(() => {});
@@ -63,7 +63,7 @@ export async function serve(
     app.log.error({ reason }, "unhandled promise rejection");
   });
   process.on("uncaughtException", (err) => {
-    app.log.fatal({ err }, "uncaught exception — exiting");
+    app.log.fatal({ err }, "uncaught exception - exiting");
     void shutdown("uncaughtException");
   });
 
@@ -90,6 +90,6 @@ export async function serve(
     },
     config.AUTH_ENABLED
       ? "listening"
-      : "listening — AUTH IS DISABLED, every caller is treated as an admin",
+      : "listening - AUTH IS DISABLED, every caller is treated as an admin",
   );
 }

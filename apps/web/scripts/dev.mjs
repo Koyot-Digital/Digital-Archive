@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
  * Two problems this solves:
  *
  *  1. `next dev` does not read `WEB_PORT`, which `.env.example` has always
- *     advertised — so the setting was decorative.
+ *     advertised - so the setting was decorative.
  *  2. On a clash `next dev` warns once and moves to the next free port. On a
  *     machine running other local stacks that means the archive silently
  *     comes up somewhere nobody is looking, which is worse than failing. Here

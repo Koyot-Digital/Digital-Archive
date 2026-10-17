@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ModlogAction, ModlogSeverity } from "./constants.js";
+import type { ModlogAction, ModlogSeverity, SubjectPlatform } from "./constants.js";
 
 /**
  * Discord forum scrapes.
@@ -12,7 +12,7 @@ import type { ModlogAction, ModlogSeverity } from "./constants.js";
  *
  * Everything needed to turn one into an archive record lives here rather than
  * in the API, because the web app renders the same vocabulary the parser
- * produces — thread participants, ticket references, alt groupings.
+ * produces - thread participants, ticket references, alt groupings.
  */
 
 /* ───────────────────────────── primitives ───────────────────────────── */
@@ -71,7 +71,7 @@ export function snowflakeToDate(id: string): Date | null {
  * A scraper that gains a field should not start failing ingest, so unknown
  * keys pass through and everything the parser does not strictly need is
  * optional. The two things that must be present are the post id and the
- * title — without them there is neither a dedupe key nor a subject.
+ * title - without them there is neither a dedupe key nor a subject.
  */
 export const discordAuthorSchema = z
   .object({
@@ -146,17 +146,38 @@ export type DiscordScrapeImage = z.infer<typeof discordImageSchema>;
 
 /* ───────────────────────────── title parsing ───────────────────────────── */
 
+/**
+ * Which platform a bare number in a thread title belongs to.
+ *
+ * Discord snowflakes encode a millisecond timestamp in their high bits, so
+ * one minted after 2015 is at least 17 digits and they only grow. Roblox user
+ * ids are sequential and sit at 11 digits after two decades. The gap between
+ * the two is five orders of magnitude, which makes digit count a reliable
+ * discriminator today *and* for as long as Roblox would need to issue 10^6
+ * times more accounts than it has.
+ *
+ * It is still a heuristic, which is why it lives in one named function with
+ * this comment rather than being inlined as `length > 16` in three places.
+ */
+const SNOWFLAKE_MIN_DIGITS = 17;
+
+export function platformForId(id: string): SubjectPlatform {
+  return id.length >= SNOWFLAKE_MIN_DIGITS ? "discord" : "roblox";
+}
+
 export interface TitleAccount {
-  /** The Roblox username as written in the title, when one preceded the id. */
+  /** The username as written in the title, when one preceded the id. */
   username: string | null;
-  robloxId: string;
+  /** The account's id on its own platform. */
+  externalId: string;
+  platform: SubjectPlatform;
 }
 
 export interface ParsedModlogTitle {
   raw: string;
   /** The account the record is about: the first id named in the title. */
   primary: TitleAccount | null;
-  /** Further accounts named in the title — alts, or a renamed account. */
+  /** Further accounts named in the title - alts, or a renamed account. */
   others: TitleAccount[];
   /** How the extra accounts relate to the primary one, when stated. */
   relation: "alt" | "successor" | "related" | null;
@@ -167,7 +188,7 @@ export interface ParsedModlogTitle {
 }
 
 /**
- * `Username (robloxId)` — the unit every one of these titles is built from.
+ * `Username (robloxId)` - the unit every one of these titles is built from.
  *
  * The username half is optional because a handful of titles carry a bare id,
  * and it stops at any bracket, comma or arrow so that `A (1) --> B (2)`
@@ -175,24 +196,40 @@ export interface ParsedModlogTitle {
  * Ids are 3+ digits, so a `(2d)` duration or a `(#6066)` ticket can never be
  * mistaken for one.
  */
-const ACCOUNT_PAIR = /([^\s(),[\]<>|/]{1,48})?\s*\(\s*(\d{3,20})\s*\)/g;
+/*
+ * The closing bracket accepts `(` as well as `)`: `vhs_95. (1429202800734375996(`
+ * is a real title in the Discord forum, a shift-key slip on the closing
+ * paren. The id either side of it is unambiguous, and refusing to read it
+ * would drop a genuine moderation record over a typo.
+ */
+const ACCOUNT_PAIR = /([^\s(),[\]<>|/]{1,48})?\s*\(\s*(\d{3,20})\s*[)(]/g;
 
-/** Ticket references: `(#6066)`, `(Support #6200)`, `(Appeal-#6098)`. */
-const TICKET = /#\s*(\d{2,10})/;
+/**
+ * Ticket references.
+ *
+ * `(#6066)`, `(Support #6200)`, `(Appeal-#6098)`, `(discord-appeal #66)` all
+ * put the number straight after the `#`. The Discord forum also writes
+ * `(#discord-appeal-86)`, where the `#` labels the whole slug and the number
+ * trails it - hence the optional hyphenated-word run in the middle.
+ */
+const TICKET = /#\s*(?:[a-z][\w-]*?-)?(\d{2,10})/i;
 
 function dedupeAccounts(accounts: TitleAccount[]): TitleAccount[] {
   const seen = new Set<string>();
   const out: TitleAccount[] = [];
   for (const account of accounts) {
-    if (seen.has(account.robloxId)) continue;
-    seen.add(account.robloxId);
+    // Keyed by platform too: the same digits on two platforms are two
+    // accounts, even though in practice the ranges do not overlap.
+    const key = `${account.platform}:${account.externalId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(account);
   }
   return out;
 }
 
 /**
- * Pull the subject — and any alts — out of a forum thread title.
+ * Pull the subject - and any alts - out of a forum thread title.
  *
  * The moderators writing these titles are consistent about `Name (id)` and
  * inconsistent about everything else, so the parser leans entirely on that
@@ -210,10 +247,12 @@ export function parseModlogTitle(raw: string): ParsedModlogTitle {
 
   for (const match of title.matchAll(ACCOUNT_PAIR)) {
     const name = match[1]?.trim();
+    const externalId = match[2]!;
     accounts.push({
       // A leading `-->`, `,` or `[` is punctuation, not a username.
       username: name && /[A-Za-z0-9_]/.test(name) ? name.replace(/^[^\w]+|[^\w]+$/g, "") : null,
-      robloxId: match[2]!,
+      externalId,
+      platform: platformForId(externalId),
     });
   }
 
@@ -255,7 +294,7 @@ export interface ParsedModAction {
   duration: string | null;
   /** The reason text that followed the command, when there was one. */
   reason: string | null;
-  /** Every command in the body was struck through — nothing was enforced. */
+  /** Every command in the body was struck through - nothing was enforced. */
   revoked: boolean;
   /**
    * Commands that were struck through before this one stuck.
@@ -271,8 +310,8 @@ export interface ParsedModAction {
  * `;tban Username 3d Intentional disruption of gameplay`
  *
  * The prefix varies (`;` is the bot's, but `:` is one key to its left and
- * appears often enough to matter), and a struck-through command — wrapped in
- * `~~` — means the sanction was issued and then undone.
+ * appears often enough to matter), and a struck-through command - wrapped in
+ * `~~` - means the sanction was issued and then undone.
  */
 const COMMAND = /^\s*(~~)?\s*[;:!.]?\s*([a-z]+)\b[ \t]*(.*)$/i;
 
@@ -364,7 +403,7 @@ function parseCommandLine(line: string): CommandLine | null {
     rest = rest.slice(durationMatch[0].length).trim();
   }
 
-  const reason = rest.replace(/^[-–—:,.]\s*/, "").trim();
+  const reason = rest.replace(/^[-–-:,.]\s*/, "").trim();
 
   return {
     struck: Boolean(match[1]) || /~~\s*$/.test(line.trim()),
@@ -389,7 +428,7 @@ function parseCommandLine(line: string): CommandLine | null {
  *
  * Falls back to `note`/`info` rather than guessing: a thread whose body is
  * prose ("verbally warned, ban him if he joins again") is still a real
- * record and must land — it just does not claim an action it cannot prove.
+ * record and must land - it just does not claim an action it cannot prove.
  */
 export function parseModAction(body: string): ParsedModAction {
   const lines = (body ?? "").split(/\r?\n/).filter((l) => l.trim().length);
@@ -430,6 +469,268 @@ export function parseModAction(body: string): ParsedModAction {
     revoked,
     superseded,
   };
+}
+
+/* ─────────────────── discord-side moderation bodies ─────────────────── */
+
+/**
+ * The Discord modlog forum writes prose, not commands.
+ *
+ * Where the Roblox forum is disciplined about `;tban <user> <dur> <reason>`,
+ * this one is a staff channel talking to itself, and the same sanction turns
+ * up every one of these ways:
+ *
+ *   mute 6d toxicity
+ *   2 day mute for continuous channel misuse.
+ *   ?mute 659450283704844323 1d Instigating drama with staff.
+ *   perm ban ban evasion
+ *   warn spam and inap
+ *   Offensive image mute 4d
+ *   1d mute initially was gonna warn but decided they would continue
+ *
+ * So the parser stops trying to match a grammar and instead looks for the
+ * three facts independently, anywhere in the line: which sanction word
+ * appears, what duration appears, and what is left over once the bot prefix
+ * and the target id are removed. Order carries no meaning here, and assuming
+ * it did was what made the first attempt read "1d mute" as a note.
+ */
+
+/**
+ * Sanction words.
+ *
+ * Scanned by *position*, not priority: the sanction is the first one the
+ * moderator wrote, and the words recur inside reasons. "mute 7d ban evasion"
+ * is a mute whose reason mentions banning - picking the highest-priority
+ * match instead of the earliest turned every one of those into a ban.
+ *
+ * `ban` has to cover "banned" and "banning", because `\bban\b` does not:
+ * the trailing word boundary fails against the next letter, so "perm banned
+ * for attempting to scam" read as a note.
+ *
+ * Longer forms are listed before the shorter ones they contain, which only
+ * matters for resolving a tie at the same offset - `perm ban` and `ban` both
+ * start matching inside "perm ban", and the compound is the real sanction.
+ */
+const DISCORD_ACTIONS: [RegExp, ModlogAction][] = [
+  [/\b(?:perma?(?:nent(?:ly)?)?[\s-]*ban(?:ned|ning)?|pban|permban(?:ned)?)\b/i, "ban"],
+  // Lifting a sanction is a record, but it is not itself a punishment.
+  [/\b(?:unmute[ds]?|unban(?:ned)?)\b/i, "note"],
+  [/\b(?:tempban(?:ned)?|tban)\b/i, "temp_ban"],
+  // "full exclusion" is this channel's phrasing for removal from the server.
+  [/\b(?:exclusion|exclude[ds]?|excluding)\b/i, "ban"],
+  [/\bban(?:ned|ning)?\b/i, "ban"],
+  [/\b(?:timeout|mute[ds]?|muting)\b/i, "mute"],
+  [/\bwarn(?:ing|ed|s)?\b/i, "warning"],
+  [/\bkick(?:ed|ing|s)?\b/i, "kick"],
+];
+
+/** The earliest sanction word in the text, or null when there is none. */
+function firstAction(text: string): { action: ModlogAction; word: string } | null {
+  let best: { action: ModlogAction; word: string; at: number; length: number } | null = null;
+  for (const [re, action] of DISCORD_ACTIONS) {
+    const match = re.exec(text);
+    if (!match) continue;
+    const at = match.index;
+    // Earlier wins; at the same offset the longer match wins, so `perm ban`
+    // beats the `ban` sitting inside it.
+    if (!best || at < best.at || (at === best.at && match[0].length > best.length)) {
+      best = { action, word: match[0].toLowerCase(), at, length: match[0].length };
+    }
+  }
+  return best ? { action: best.action, word: best.word } : null;
+}
+
+/**
+ * A duration anywhere in the text: `6d`, `7 day`, `2 days`, `12h`, `1 week`.
+ *
+ * Anchored on the unit rather than the number so `mute 659450283704844323 1d`
+ * cannot read the target snowflake as a quantity.
+ */
+const DISCORD_DURATION =
+  /\b(\d{1,3})\s*(?:(d)(?:ays?)?|(h)(?:ours?|rs?)?|(w)(?:eeks?)?|(mo)(?:nths?)?|(y)(?:ears?)?|(m)(?:in(?:ute)?s?))\b/i;
+
+/** `perm`, `permanent`, `indefinite` - a sanction with no end date. */
+const PERMANENT = /\b(?:perma?(?:nent(?:ly)?)?|indefinite(?:ly)?|forever)\b/i;
+
+/** A leading bot prefix plus the target id: `?mute 659450283704844323 …`. */
+const BOT_PREFIX = /^\s*[?!./;$]\s*/;
+
+/**
+ * Severity for a Discord sanction.
+ *
+ * Scaled separately from the Roblox side because the actions are not
+ * comparable: a seven-day mute is a nuisance, a seven-day ban is an
+ * exclusion, and flattening both to "high" would make the severity column
+ * useless for exactly the records a reader is scanning for.
+ */
+function discordSeverity(
+  action: ModlogAction,
+  durationDays: number | null,
+  permanent: boolean,
+): ModlogSeverity {
+  if (action === "ban" && (permanent || durationDays === null)) return "critical";
+  if (action === "ban" || action === "temp_ban") {
+    if (durationDays === null) return "high";
+    if (durationDays >= 7) return "high";
+    if (durationDays >= 2) return "medium";
+    return "low";
+  }
+  if (action === "mute") {
+    if (durationDays === null) return "low";
+    // A week of silence is a real sanction; an hour is a cooldown.
+    if (durationDays >= 7) return "medium";
+    if (durationDays >= 1) return "low";
+    return "info";
+  }
+  if (action === "kick") return "low";
+  if (action === "warning") return "low";
+  return "info";
+}
+
+/** Strip the markdown a staff channel leaves behind, keeping the words. */
+function stripNoise(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // [label](url) -> label
+    .replace(/<@!?\d+>/g, "") // mentions
+    .replace(/<#\d+>/g, "") // channel links
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[*_~`>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Read a Discord moderation body.
+ *
+ * Same contract as `parseModAction`: never throws, falls back to `note` when
+ * it cannot prove a sanction, and resolves a struck-through line by taking
+ * the first that is *not* struck - these moderators correct durations in
+ * place exactly as the Roblox ones do.
+ */
+export function parseDiscordModAction(body: string): ParsedModAction {
+  const lines = (body ?? "").split(/\r?\n/).filter((l) => l.trim().length);
+
+  const none: ParsedModAction = {
+    action: "note",
+    severity: "info",
+    command: null,
+    durationDays: null,
+    duration: null,
+    reason: null,
+    revoked: false,
+    superseded: [],
+  };
+  if (!lines.length) return none;
+
+  interface Candidate {
+    struck: boolean;
+    action: ModlogAction;
+    word: string;
+    durationDays: number | null;
+    duration: string | null;
+    permanent: boolean;
+    reason: string | null;
+  }
+
+  const candidates: Candidate[] = [];
+
+  for (const raw of lines) {
+    // A line wrapped in ~~ is a withdrawn sanction. A body can hold the
+    // struck original and its replacement on the *same* line, so the split
+    // below has to look inside the line, not just at its ends.
+    for (const [segment, struck] of segmentsOf(raw)) {
+      const text = stripNoise(segment.replace(BOT_PREFIX, ""));
+      if (!text) continue;
+
+      const hit = firstAction(text);
+      if (!hit) continue;
+      const { action, word } = hit;
+
+      const durationMatch = DISCORD_DURATION.exec(text);
+      let durationDays: number | null = null;
+      let duration: string | null = null;
+      if (durationMatch) {
+        const amount = Number(durationMatch[1]);
+        const unit = (
+          durationMatch[2] ?? durationMatch[3] ?? durationMatch[4] ??
+          durationMatch[5] ?? durationMatch[6] ?? durationMatch[7] ?? "d"
+        ).toLowerCase();
+        const perDay: Record<string, number> = {
+          d: 1, h: 1 / 24, w: 7, mo: 30, y: 365, m: 1 / 1440,
+        };
+        durationDays = Math.round(amount * (perDay[unit] ?? 1) * 1000) / 1000;
+        duration = `${amount}${unit}`;
+      }
+
+      const permanent = PERMANENT.test(text);
+      // Whatever is left after removing the sanction word, the duration and
+      // the target id is the reason the moderator gave. Only the first
+      // occurrence of the sanction word goes - a later one is part of the
+      // reason ("ban evasion") and deleting it would mangle the sentence.
+      const reason = text
+        .replace(word, " ")
+        .replace(DISCORD_DURATION, " ")
+        .replace(PERMANENT, " ")
+        .replace(/\b\d{15,24}\b/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/^[-–-:,.\s]+|[\s,.]+$/g, "")
+        .trim();
+
+      candidates.push({
+        struck,
+        action:
+          // "ban 7d" is a suspension; "ban" alone is removal.
+          action === "ban" && durationDays !== null && !permanent ? "temp_ban" : action,
+        word,
+        durationDays,
+        duration,
+        permanent,
+        reason: reason.length ? reason.slice(0, 2000) : null,
+      });
+    }
+  }
+
+  if (!candidates.length) return none;
+
+  const effective = candidates.find((c) => !c.struck);
+  const chosen = effective ?? candidates[0]!;
+  const revoked = !effective;
+
+  return {
+    action: chosen.action,
+    severity: revoked
+      ? "info"
+      : discordSeverity(chosen.action, chosen.durationDays, chosen.permanent),
+    command: chosen.word || null,
+    durationDays: chosen.durationDays,
+    duration: chosen.duration,
+    reason: chosen.reason,
+    revoked,
+    superseded: candidates
+      .filter((c) => c !== chosen && c.struck)
+      .map((c) => ({ command: c.word, duration: c.duration })),
+  };
+}
+
+/**
+ * Split a line into `~~struck~~` and plain segments.
+ *
+ * `~~mute 7d reason~~ mute 5d reason` is one line carrying both the
+ * withdrawn sanction and the one that replaced it, so a whole-line struck
+ * test would mark the correction itself as revoked.
+ */
+function segmentsOf(line: string): [string, boolean][] {
+  const out: [string, boolean][] = [];
+  const pattern = /~~([\s\S]*?)~~/g;
+  let cursor = 0;
+  for (const match of line.matchAll(pattern)) {
+    if (match.index! > cursor) out.push([line.slice(cursor, match.index), false]);
+    out.push([match[1]!, true]);
+    cursor = match.index! + match[0].length;
+  }
+  if (cursor < line.length) out.push([line.slice(cursor), false]);
+  // An unterminated `~~` leaves the whole line plain, which is the safe read.
+  return out.length ? out : [[line, false]];
 }
 
 /* ───────────────────────────── mentions ───────────────────────────── */

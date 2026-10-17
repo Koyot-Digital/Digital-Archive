@@ -1,6 +1,8 @@
 import type { IngressRecord } from "./schemas.js";
 import { ingressRecordSchema } from "./schemas.js";
+import type { SubjectPlatform } from "./constants.js";
 import {
+  parseDiscordModAction,
   parseModAction,
   parseModlogTitle,
   type DiscordForumPost,
@@ -14,16 +16,29 @@ import {
  * Discord forum thread → archive record.
  *
  * One thread is one event, even when it announces a sanction against four alt
- * accounts: the record is filed under the first Roblox id in the title and
- * the rest are stored as related accounts. Splitting them into four records
+ * accounts: the record is filed under the first account in the title and the
+ * rest are stored as related accounts. Splitting them into four records
  * would quadruple the archive's apparent size and make every count wrong.
  *
  * The mapper never throws. A thread it cannot place is returned as a
  * rejection with a reason, so a 500-thread import reports the handful it
  * could not read instead of failing as a whole.
+ *
+ * Two forums feed this, and they are not the same dialect:
+ *
+ *   roblox-modlogs   subjects are Roblox accounts; bodies are bot commands
+ *                    (`;tban wojtek3441 2d Intentional disruption`)
+ *   discord-modlogs  subjects are Discord accounts; bodies are prose
+ *                    (`2 day mute for continuous channel misuse.`)
+ *
+ * so the source is chosen per forum and the body parser with it. Everything
+ * after that - titles, alts, threads, attachments - is shared, because the
+ * scraper emits one shape and the two forums are run by the same staff.
  */
 
 export const FORUM_SOURCE = "discord-forum";
+/** The Discord-side forum gets its own source so the two never dedupe into each other. */
+export const DISCORD_FORUM_SOURCE = "discord-modlogs";
 
 /** Images per record, matching the API's own per-log ceiling. */
 const MAX_IMAGES = 24;
@@ -31,10 +46,45 @@ const MAX_IMAGES = 24;
 const MAX_MESSAGES = 400;
 const MAX_TITLE = 300;
 
+export interface ForumDialect {
+  /** Value written to `source`, and half of the dedupe key. */
+  source: string;
+  /** Platform a bare account in this forum's titles defaults to. */
+  subjectPlatform: SubjectPlatform;
+  parseBody: (body: string) => ParsedModAction;
+}
+
+const ROBLOX_DIALECT: ForumDialect = {
+  source: FORUM_SOURCE,
+  subjectPlatform: "roblox",
+  parseBody: parseModAction,
+};
+
+const DISCORD_DIALECT: ForumDialect = {
+  source: DISCORD_FORUM_SOURCE,
+  subjectPlatform: "discord",
+  parseBody: parseDiscordModAction,
+};
+
+/**
+ * Pick the dialect for a scraped thread.
+ *
+ * Keyed on the forum *name* rather than its id so a re-created channel keeps
+ * working, and defaulting to the Roblox dialect because that is the forum the
+ * archive was built around - an unrecognised forum is more likely to be a
+ * renamed Roblox channel than a new platform.
+ */
+export function dialectFor(post: DiscordForumPost): ForumDialect {
+  const name = (post.forum_name ?? "").toLowerCase();
+  if (name.includes("discord-modlog")) return DISCORD_DIALECT;
+  return ROBLOX_DIALECT;
+}
+
 export interface ForumMapping {
   record: IngressRecord;
   title: ParsedModlogTitle;
   sanction: ParsedModAction;
+  dialect: ForumDialect;
   /** Images the mapper had to drop to stay under the per-record ceiling. */
   droppedImages: number;
 }
@@ -79,10 +129,14 @@ function imageUrl(image: DiscordScrapeImage): string | null {
  *
  * The forum's own tags ("Appealable", "Appeal Denied") are the moderators'
  * language and are kept verbatim apart from casing. The mapper adds only
- * facts it can prove from the body: which command was run, and whether it was
- * struck through.
+ * facts it can prove from the body: which sanction was issued, and whether it
+ * was struck through.
  */
-function tagsFor(post: DiscordForumPost, sanction: ParsedModAction, title: ParsedModlogTitle): string[] {
+function tagsFor(
+  post: DiscordForumPost,
+  sanction: ParsedModAction,
+  title: ParsedModlogTitle,
+): string[] {
   const tags = new Set<string>();
   for (const tag of post.tags) {
     const clean = tag.trim().toLowerCase();
@@ -99,7 +153,14 @@ function tagsFor(post: DiscordForumPost, sanction: ParsedModAction, title: Parse
 function usersFor(post: DiscordForumPost) {
   const byId = new Map<
     string,
-    { id: string; username?: string; displayName?: string; avatarUrl?: string; bot: boolean; role: "author" | "commenter" }
+    {
+      id: string;
+      username?: string;
+      displayName?: string;
+      avatarUrl?: string;
+      bot: boolean;
+      role: "author" | "commenter";
+    }
   >();
 
   const add = (author: DiscordScrapeAuthor | undefined, role: "author" | "commenter") => {
@@ -134,8 +195,9 @@ function usersFor(post: DiscordForumPost) {
  * as a 400 from the API with no context.
  */
 export function forumPostToIngressRecord(post: DiscordForumPost): ForumMapResult {
+  const dialect = dialectFor(post);
   const title = parseModlogTitle(post.title);
-  const sanction = parseModAction(post.body);
+  const sanction = dialect.parseBody(post.body);
 
   if (!title.primary) {
     return {
@@ -143,7 +205,7 @@ export function forumPostToIngressRecord(post: DiscordForumPost): ForumMapResult
       postId: post.post_id,
       title: post.title,
       reason:
-        "no Roblox id in the thread title — the subject cannot be identified, " +
+        "no account id in the thread title - the subject cannot be identified, " +
         "so the record has nothing to be filed under",
     };
   }
@@ -178,8 +240,11 @@ export function forumPostToIngressRecord(post: DiscordForumPost): ForumMapResult
   const occurredAt = post.posted_at ?? post.created_at;
 
   const draft = {
-    robloxId: title.primary.robloxId,
-    ...(title.primary.username ? { username: title.primary.username } : {}),
+    subject: {
+      platform: title.primary.platform,
+      externalId: title.primary.externalId,
+      ...(title.primary.username ? { username: title.primary.username } : {}),
+    },
 
     title: post.title.slice(0, MAX_TITLE),
     body: post.body ?? "",
@@ -190,7 +255,7 @@ export function forumPostToIngressRecord(post: DiscordForumPost): ForumMapResult
     ...(sanction.reason ? { reason: sanction.reason } : {}),
 
     ...(occurredAt ? { occurredAt } : {}),
-    source: FORUM_SOURCE,
+    source: dialect.source,
     sourceId: post.post_id,
     ...(post.url && /^https?:\/\//i.test(post.url) ? { sourceUrl: post.url } : {}),
 
@@ -213,9 +278,17 @@ export function forumPostToIngressRecord(post: DiscordForumPost): ForumMapResult
     imageIds: [],
 
     relatedAccounts: title.others.map((account) => ({
-      robloxId: account.robloxId,
+      platform: account.platform,
+      externalId: account.externalId,
       ...(account.username ? { username: account.username } : {}),
-      relation: title.relation ?? "related",
+      // An account named on a different platform from the subject is a linked
+      // identity, not an alt - "same person elsewhere" rather than "same
+      // person again". Saying `alt` there would assert something the title
+      // does not.
+      relation:
+        account.platform !== title.primary!.platform
+          ? ("related" as const)
+          : (title.relation ?? ("related" as const)),
     })),
     ...(title.ticket ? { ticketRef: `#${title.ticket}` } : {}),
 
@@ -249,5 +322,5 @@ export function forumPostToIngressRecord(post: DiscordForumPost): ForumMapResult
     };
   }
 
-  return { ok: true, record: parsed.data, title, sanction, droppedImages };
+  return { ok: true, record: parsed.data, title, sanction, dialect, droppedImages };
 }

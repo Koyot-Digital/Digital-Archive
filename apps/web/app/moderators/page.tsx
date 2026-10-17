@@ -43,7 +43,7 @@ export default async function ModeratorsPage() {
       />
 
       {/*
-       * Said once here, in full, for the whole set — which is what lets every
+       * Said once here, in full, for the whole set - which is what lets every
        * individual name carry only the small dashed-shield glyph instead of
        * repeating "as scraped" sixteen times down the page.
        */}
@@ -94,7 +94,7 @@ export default async function ModeratorsPage() {
                 </p>
               </div>
 
-              {/* The count is the column — the word "records" is the header's
+              {/* The count is the column - the word "records" is the header's
                   job, and repeating it on every row said nothing new. */}
               <p
                 className="shrink-0 text-lg font-semibold tabular-nums"

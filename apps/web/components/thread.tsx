@@ -15,7 +15,7 @@ import {
  * The discussion behind a record.
  *
  * On these forum threads the sanction is the first line and the *argument* is
- * everything after it — the appeal, the correction, the second opinion, the
+ * everything after it - the appeal, the correction, the second opinion, the
  * decision to escalate a suspension to a ban. Showing the record without the
  * discussion would present the sanction as more settled than it was, so the
  * thread is rendered in full rather than summarised.
@@ -57,7 +57,7 @@ export function ThreadPanel({ thread }: { thread: Thread | null | undefined }) {
 
         <div className="flex flex-wrap items-center gap-2">
           {thread.locked ? (
-            <ThreadFlag icon={IconLock} label="Thread locked — no further replies accepted" />
+            <ThreadFlag icon={IconLock} label="Thread locked - no further replies accepted" />
           ) : null}
           {thread.archived ? (
             <ThreadFlag icon={IconArchived} label="Thread archived on Discord" />
@@ -136,7 +136,7 @@ export function ThreadPanel({ thread }: { thread: Thread | null | undefined }) {
                       className="meta mt-1.5"
                       title={`${message.imageCount} attachment${
                         message.imageCount === 1 ? "" : "s"
-                      } — shown in the evidence above`}
+                      } - shown in the evidence above`}
                     >
                       <IconAttachment className="icon-sm" />
                       <span aria-hidden>{message.imageCount}</span>

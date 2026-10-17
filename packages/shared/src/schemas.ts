@@ -3,6 +3,7 @@ import {
   MODLOG_ACTIONS,
   MODLOG_SEVERITIES,
   RECORD_STATUSES,
+  SUBJECT_PLATFORMS,
   SUBJECT_RELATIONS,
   THREAD_ROLES,
   USER_ROLES,
@@ -130,9 +131,43 @@ export const discordThreadSchema = z.object({
 });
 export type DiscordThread = z.infer<typeof discordThreadSchema>;
 
-/** Another Roblox account named on the same record. */
+/* ───────────────────────────── subjects ───────────────────────────── */
+
+export const zPlatform = z.enum(SUBJECT_PLATFORMS);
+
+/**
+ * An account id on some platform.
+ *
+ * Deliberately not validated against a per-platform pattern beyond "positive
+ * integer that fits in a bigint": Roblox ids and Discord snowflakes are both
+ * sequential-ish integers, and a stricter rule here would start rejecting
+ * real accounts the day either platform changes its allocation.
+ */
+export const zExternalId = z
+  .union([z.string(), z.number().int().positive()])
+  .transform((v) => String(v))
+  .refine((v) => /^[1-9][0-9]{0,19}$/.test(v), "must be a positive account id");
+
+/** The account a record is about, or one grouped with it. */
+export const subjectRefSchema = z.object({
+  platform: zPlatform.default("roblox"),
+  externalId: zExternalId,
+  username: z.string().trim().min(1).max(64).optional(),
+  displayName: z.string().trim().min(1).max(64).optional(),
+  avatarUrl: z.string().url().max(2048).optional(),
+});
+export type SubjectRef = z.infer<typeof subjectRefSchema>;
+
+/**
+ * Another account named on the same record.
+ *
+ * Carries its own platform, because these groupings cross platforms: the
+ * Discord forum routinely names a Discord account and the Roblox account
+ * behind it in one title.
+ */
 export const relatedAccountSchema = z.object({
-  robloxId: zRobloxId,
+  platform: zPlatform.default("roblox"),
+  externalId: zExternalId,
   username: z.string().trim().min(1).max(64).optional(),
   relation: zRelation.default("alt"),
 });
@@ -148,7 +183,22 @@ export type RelatedAccount = z.infer<typeof relatedAccountSchema>;
  * without a `sourceId` falls back to a content hash computed server-side.
  */
 export const ingressRecordSchema = z.object({
-  robloxId: zRobloxId,
+  /**
+   * The account the record is about.
+   *
+   * Two spellings are accepted, and exactly one must be present:
+   *
+   *   robloxId: 156                                  (the original form)
+   *   subject:  { platform: "discord", externalId: "4999…" }
+   *
+   * `robloxId` is kept because it is the documented field every existing
+   * scraper sends, and silently breaking a nightly cron to tidy up a schema
+   * would be the wrong trade. `subjectOf()` below resolves either into one
+   * shape so nothing downstream has to care which arrived.
+   */
+  robloxId: zRobloxId.optional(),
+  subject: subjectRefSchema.optional(),
+  /** Legacy, applied to the subject above. Superseded by `subject.*`. */
   username: z.string().trim().min(1).max(64).optional(),
   displayName: z.string().trim().min(1).max(64).optional(),
   avatarUrl: z.string().url().max(2048).optional(),
@@ -173,7 +223,7 @@ export const ingressRecordSchema = z.object({
   imageIds: z.array(zId).max(24).default([]),
 
   /**
-   * Other accounts named on the same record — alts, or a successor account.
+   * Other accounts named on the same record - alts, or a successor account.
    *
    * These are deliberately *not* extra records: one sanction announced for
    * four alts is one event. The archive stores the grouping so every alt's
@@ -187,6 +237,42 @@ export const ingressRecordSchema = z.object({
   thread: discordThreadSchema.optional(),
 });
 export type IngressRecord = z.infer<typeof ingressRecordSchema>;
+
+/**
+ * Resolve either subject spelling into one shape.
+ *
+ * Returns null when neither was supplied, which the batch schema rejects by
+ * index so the scraper learns which record was wrong rather than getting a
+ * blanket 422.
+ */
+export function subjectOf(record: {
+  robloxId?: string | undefined;
+  subject?: SubjectRef | undefined;
+  username?: string | undefined;
+  displayName?: string | undefined;
+  avatarUrl?: string | undefined;
+}): SubjectRef | null {
+  if (record.subject) {
+    // An explicit subject wins, but still inherits the legacy display fields
+    // when it did not carry its own.
+    return {
+      ...record.subject,
+      username: record.subject.username ?? record.username,
+      displayName: record.subject.displayName ?? record.displayName,
+      avatarUrl: record.subject.avatarUrl ?? record.avatarUrl,
+    };
+  }
+  if (record.robloxId) {
+    return {
+      platform: "roblox",
+      externalId: record.robloxId,
+      username: record.username,
+      displayName: record.displayName,
+      avatarUrl: record.avatarUrl,
+    };
+  }
+  return null;
+}
 
 export const ingressBatchSchema = z.object({
   /** Caller-chosen key; replaying the same key is a no-op for 24 hours. */
@@ -202,7 +288,7 @@ export type IngressBatch = z.infer<typeof ingressBatchSchema>;
  * The raw-scrape entry point.
  *
  * Takes Discord forum threads exactly as the scraper emits them and maps them
- * server-side. The alternative — making the scraper build archive records —
+ * server-side. The alternative - making the scraper build archive records -
  * would put the title-parsing and command-parsing rules in a second codebase
  * and guarantee the two drift apart.
  */
@@ -226,12 +312,19 @@ export const ingressResultSchema = z.object({
     failed: z.number(),
     imagesQueued: z.number(),
   }),
-  created: z.array(z.object({ id: zId, robloxId: z.string(), url: z.string() })),
+  created: z.array(
+    z.object({
+      id: zId,
+      platform: zPlatform,
+      externalId: z.string(),
+      url: z.string(),
+    }),
+  ),
   errors: z.array(
-    z.object({ index: z.number(), robloxId: z.string().nullable(), message: z.string() }),
+    z.object({ index: z.number(), subject: z.string().nullable(), message: z.string() }),
   ),
   /**
-   * Threads the mapper could not place — almost always a title with no Roblox
+   * Threads the mapper could not place - almost always a title with no Roblox
    * id in it. Reported rather than silently dropped so the scrape can be
    * corrected at the source.
    */
@@ -308,6 +401,8 @@ export const listSubjectsQuerySchema = z.object({
   page: zPage,
   limit: zLimit,
   q: z.string().trim().max(64).optional(),
+  /** Omitted lists every platform's subjects together. */
+  platform: zPlatform.optional(),
   sort: z.enum(["recent", "most_logs", "username"]).default("recent"),
 });
 

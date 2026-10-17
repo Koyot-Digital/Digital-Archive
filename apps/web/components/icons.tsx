@@ -13,7 +13,7 @@ import { cx } from "@/lib/format";
  *
  * Accessibility rule for everything in this file: an icon is `aria-hidden`,
  * and the element that wraps it supplies the words. An icon standing in for
- * text must carry a `title` *and* an `sr-only` label — a tooltip is not
+ * text must carry a `title` *and* an `sr-only` label - a tooltip is not
  * readable by a screen reader and is unreachable by touch.
  */
 
@@ -66,7 +66,7 @@ export function IconReply(p: IconProps) {
   );
 }
 
-/** An attachment — evidence hanging off a record. */
+/** An attachment - evidence hanging off a record. */
 export function IconAttachment(p: IconProps) {
   return (
     <Svg {...p}>
@@ -119,7 +119,7 @@ export function IconAuthor(p: IconProps) {
   );
 }
 
-/** Grouped accounts — alts, or a rename. */
+/** Grouped accounts - alts, or a rename. */
 export function IconAccounts(p: IconProps) {
   return (
     <Svg {...p}>
@@ -310,8 +310,8 @@ export function IconChevronRight(p: IconProps) {
 
 /*
  * These replace the Unicode glyphs the embed cards used to draw (▶ 𝕏 ◇ ◈ ▣).
- * Those were at the mercy of whichever font resolved them — 𝕏 in particular
- * is a mathematical symbol that falls back to a box on plenty of systems — and
+ * Those were at the mercy of whichever font resolved them - 𝕏 in particular
+ * is a mathematical symbol that falls back to a box on plenty of systems - and
  * they could not inherit stroke weight from the rest of the set. No brand
  * marks: a neutral shape saying what a link *is* travels better than a logo
  * drawn from memory, and does not go stale when a company rebrands.
@@ -374,7 +374,7 @@ const SEVERITY_STEP: Record<ModlogSeverity, number> = {
 /**
  * Severity as a stepped meter.
  *
- * The palette is greyscale, so severity has no hue to live in — and five
+ * The palette is greyscale, so severity has no hue to live in - and five
  * greys are hard to rank by eye and impossible to rank reliably for a reader
  * with low contrast sensitivity. Counting filled bars works regardless: the
  * glyph encodes the rank in *quantity*, with value as reinforcement rather

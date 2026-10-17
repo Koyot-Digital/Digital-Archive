@@ -16,7 +16,7 @@ import { safeFetch } from "./links.js";
  * Upload pipeline: anything in, WebP out.
  *
  * Everything that enters the archive is re-encoded. That is partly about size
- * — a 4MB screenshot PNG typically lands around 150-350KB as WebP — and
+ * - a 4MB screenshot PNG typically lands around 150-350KB as WebP - and
  * partly about safety: re-encoding through sharp discards EXIF (which often
  * carries GPS and device data from screenshots), strips colour profiles and
  * ICC payloads, and guarantees the stored bytes are an image rather than a
@@ -150,7 +150,7 @@ export async function convertToWebp(input: Buffer): Promise<ProcessedImage> {
  */
 export async function attachImage(input: Buffer, opts: AttachOptions): Promise<DbImage> {
   const parent = await db
-    .select({ id: modlogs.id, robloxId: modlogs.robloxId, imageCount: modlogs.imageCount })
+    .select({ id: modlogs.id, subjectId: modlogs.subjectId, imageCount: modlogs.imageCount })
     .from(modlogs)
     .where(eq(modlogs.id, opts.modlogId))
     .limit(1)
@@ -186,7 +186,9 @@ export async function attachImage(input: Buffer, opts: AttachOptions): Promise<D
       .values({
         id: processed.id,
         modlogId: opts.modlogId,
-        robloxId: parent.robloxId,
+        // Written for clarity; the images_subject_sync trigger is the thing
+        // that guarantees it matches the parent record.
+        subjectId: parent.subjectId,
         position,
         caption: opts.caption ?? null,
         sha256: processed.sha256,

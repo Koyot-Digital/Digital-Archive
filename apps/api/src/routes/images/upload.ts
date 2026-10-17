@@ -1,16 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import {
   ID_PATTERN,
   imageFetchSchema,
   imagePatchSchema,
   imageUploadMetaSchema,
   normalizeId,
+  subjectArchivePath,
+  type SubjectPlatform,
 } from "@archive/shared";
 import { config } from "../../config.js";
 import { db } from "../../db/client.js";
-import { images } from "../../db/schema.js";
+import { images, subjects } from "../../db/schema.js";
 import { badRequest, payloadTooLarge, unauthorized } from "../../lib/errors.js";
 import { safeEqual } from "../../lib/crypto.js";
 import { invalidate } from "../../lib/redis.js";
@@ -110,8 +112,9 @@ export async function imageWriteRoutes(app: FastifyInstance): Promise<void> {
       }
 
       reply.status(201);
+      const subjectMap = await subjectsFor(uploaded);
       return {
-        images: uploaded.map((row) => serialise(row)),
+        images: uploaded.map((row) => serialise(row, subjectMap.get(row.subjectId))),
         errors,
       };
     },
@@ -144,7 +147,11 @@ export async function imageWriteRoutes(app: FastifyInstance): Promise<void> {
       }
 
       reply.status(result.images.length ? 201 : 207);
-      return { images: result.images.map(serialise), errors: result.errors };
+      const subjectMap = await subjectsFor(result.images);
+      return {
+        images: result.images.map((row) => serialise(row, subjectMap.get(row.subjectId))),
+        errors: result.errors,
+      };
     },
   );
 
@@ -199,7 +206,8 @@ export async function imageWriteRoutes(app: FastifyInstance): Promise<void> {
     if (!row) throw badRequest("Image not found");
 
     await invalidate(`img:meta:${id}`);
-    return { image: serialise(row) };
+    const subjectMap = await subjectsFor([row]);
+    return { image: serialise(row, subjectMap.get(row.subjectId)) };
   });
 
   /**
@@ -237,15 +245,40 @@ export async function imageWriteRoutes(app: FastifyInstance): Promise<void> {
 /* ─────────────────────────── helpers ─────────────────────────── */
 
 type ImageRow = typeof images.$inferSelect;
+interface SubjectIdentity {
+  platform: SubjectPlatform;
+  externalId: string;
+}
 
-function serialise(row: ImageRow) {
+/** One query for however many images a response is about to serialise. */
+async function subjectsFor(rows: ImageRow[]): Promise<Map<string, SubjectIdentity>> {
+  const ids = [...new Set(rows.map((r) => r.subjectId))];
+  if (!ids.length) return new Map();
+  const found = await db
+    .select({ id: subjects.id, platform: subjects.platform, externalId: subjects.externalId })
+    .from(subjects)
+    .where(inArray(subjects.id, ids));
+  return new Map(
+    found.map((s) => [s.id, { platform: s.platform, externalId: s.externalId.toString() }]),
+  );
+}
+
+/**
+ * Shape one image for an upload/patch response.
+ *
+ * `subject` is passed in rather than joined here: the viewer page lives under
+ * the subject's platform path, which the image row only knows by surrogate id.
+ */
+function serialise(row: ImageRow, subject?: SubjectIdentity) {
   return {
     id: row.id,
     modlogId: row.modlogId,
-    robloxId: row.robloxId.toString(),
+    subjectId: row.subjectId,
     url: config.imageUrl(row.id, "full"),
     thumbUrl: config.imageUrl(row.id, "thumb"),
-    pageUrl: `/roblox-modlogs/${row.robloxId.toString()}/${row.modlogId}/${row.id}`,
+    pageUrl: subject
+      ? `${subjectArchivePath(subject.platform, subject.externalId)}/${row.modlogId}/${row.id}`
+      : null,
     width: row.width,
     height: row.height,
     bytes: row.bytes,

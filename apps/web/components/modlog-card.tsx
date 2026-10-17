@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Modlog } from "@/lib/api";
+import { PLATFORM_LABELS } from "@archive/shared";
 import { formatDate, formatNumber } from "@/lib/format";
 import { ActionBadge, Meta, SeverityBadge, StatusBadge, Tag } from "./badges";
 import { IconImage, IconRevision, IconThread, IconTicket } from "./icons";
@@ -80,7 +81,8 @@ export function ModlogCard({ modlog, showSubject = false }: { modlog: Modlog; sh
 
           {showSubject ? (
             <p className="mt-0.5 text-xs text-faint">
-              Subject <span className="font-mono">{modlog.robloxId}</span>
+              {PLATFORM_LABELS[modlog.platform]}{" "}
+              <span className="font-mono">{modlog.externalId}</span>
             </p>
           ) : null}
 

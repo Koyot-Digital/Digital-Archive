@@ -30,7 +30,7 @@ export type AvatarSize = keyof typeof SIZES;
  * Every place the archive draws one, the account's name is already next to it
  * in text, so the image carries no information a reader would otherwise miss:
  * `alt=""` and no screen-reader label, or assistive tech announces the same
- * name twice in a row. The bot marker is the exception — it is a fact about
+ * name twice in a row. The bot marker is the exception - it is a fact about
  * the account that appears nowhere else, so it gets read out.
  */
 export function DiscordAvatar({
@@ -104,7 +104,7 @@ export function DiscordChip({
 /**
  * Marks an identity that has never been confirmed against Discord.
  *
- * A dashed shield, repeated next to every one of these names — so it has to
+ * A dashed shield, repeated next to every one of these names - so it has to
  * be small. It matters for provenance but it is not a warning: the scraped
  * name was accurate when it was captured, and that is most of what an archive
  * promises. The sentence it replaces is in the tooltip and the accessible

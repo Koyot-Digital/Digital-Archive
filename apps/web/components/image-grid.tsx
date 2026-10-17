@@ -8,7 +8,7 @@ import { formatBytes, formatPercent } from "@/lib/format";
  * Each tile links to the image's own page
  * (`/roblox-modlogs/:robloxId/:logId/:imageId`) rather than opening a JS
  * lightbox, so every screenshot in the archive has a stable, shareable,
- * server-rendered URL — which is the whole reason that route exists.
+ * server-rendered URL - which is the whole reason that route exists.
  */
 export function ImageGrid({ images }: { images: ArchiveImage[] }) {
   if (!images.length) return null;
@@ -68,7 +68,7 @@ export function ImageFacts({ image }: { image: ArchiveImage }) {
     ["Dimensions", `${image.width} × ${image.height}`],
     ["Stored", `${formatBytes(image.bytes)} WebP`],
     ["Original", `${formatBytes(image.originalBytes)} ${image.originalFormat.toUpperCase()}`],
-    ["Reduction", ratio > 0 ? formatPercent(ratio) : "—"],
+    ["Reduction", ratio > 0 ? formatPercent(ratio) : "-"],
     ["Image ID", image.id],
   ];
 

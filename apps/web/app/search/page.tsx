@@ -36,7 +36,7 @@ export default async function SearchPage({ searchParams }: Props) {
         description={
           results
             ? `${formatNumber(results.total)} record${results.total === 1 ? "" : "s"} matched.`
-            : "Search record titles, bodies, reasons, tags, usernames and Roblox IDs."
+            : "Search record titles, bodies, reasons, tags, usernames and account IDs."
         }
       />
 

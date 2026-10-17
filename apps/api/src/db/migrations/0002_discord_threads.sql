@@ -1,5 +1,5 @@
 -- ───────────────────────────────────────────────────────────────────────────
---  0002 — Discord forum provenance
+--  0002 - Discord forum provenance
 --
 --  The archive's first real data source is a Discord forum channel, where one
 --  thread is one moderation event. A thread carries three things the original
@@ -8,14 +8,14 @@
 --    * who posted it and who argued about it, as Discord accounts;
 --    * the discussion itself, which is frequently where the appeal, the
 --      correction and the second opinion live;
---    * other Roblox accounts named in the same title — alts, or an account
+--    * other Roblox accounts named in the same title - alts, or an account
 --      that was abandoned for a new one.
 --
 --  Discord identities get their own table rather than being denormalised onto
 --  every record: eighteen moderators wrote five hundred of these threads, and
 --  a username or avatar that changes should change in one row, not five
---  hundred. It is also a cache — scraped values seed it, the Discord API
---  refreshes it — so it needs its own freshness bookkeeping.
+--  hundred. It is also a cache - scraped values seed it, the Discord API
+--  refreshes it - so it needs its own freshness bookkeeping.
 -- ───────────────────────────────────────────────────────────────────────────
 
 -- ───────────────────────── discord identities ─────────────────────────
@@ -210,8 +210,8 @@ UPDATE modlogs SET search_vector = modlog_search_vector(
 );
 
 -- Keep modlog_messages.image_count honest about what is actually attached.
--- Replies are not separately galleried — their attachments join the record's
--- evidence — but the count tells a reader which message brought what.
+-- Replies are not separately galleried - their attachments join the record's
+-- evidence - but the count tells a reader which message brought what.
 CREATE OR REPLACE FUNCTION modlogs_thread_recount() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN

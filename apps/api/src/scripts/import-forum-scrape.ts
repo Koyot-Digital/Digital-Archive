@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import {
   discordForumPostSchema,
   forumPostToIngressRecord,
+  subjectOf,
   type DiscordForumPost,
   type ForumRejection,
   type IngressRecord,
@@ -19,7 +20,7 @@ import { hasBotToken, resolveDiscordUsers } from "../services/discord-users.js";
  * Import a Discord forum scrape from a `.jsonl` file.
  *
  * Runs against the database directly rather than through `POST /ingress`,
- * because a 500-thread file is 1.5MB of JSON carrying every reply — a size
+ * because a 500-thread file is 1.5MB of JSON carrying every reply - a size
  * that has no business travelling over HTTP when the process can read the
  * file. The parsing, mapping and persistence are the exact same code paths
  * the endpoint uses, so an import and a live ingest cannot diverge.
@@ -119,7 +120,7 @@ interface ReadResult {
 /**
  * Stream the file a line at a time.
  *
- * JSONL exists so a 1.5MB file — or a 1.5GB one — does not have to be a
+ * JSONL exists so a 1.5MB file - or a 1.5GB one - does not have to be a
  * single JSON value held in memory, and a malformed line in the middle costs
  * one record rather than the whole import.
  */
@@ -165,6 +166,12 @@ async function readScrape(file: string, limit: number): Promise<ReadResult> {
 
 /* ───────────────────────────── importing ───────────────────────────── */
 
+/** `discord:4999…` - short enough for a progress line, precise enough to grep. */
+function subjectLabel(record: IngressRecord): string {
+  const subject = subjectOf(record);
+  return subject ? `${subject.platform}:${subject.externalId}` : "(no subject)";
+}
+
 function progress(done: number, total: number, label: string): void {
   // One rewritten line rather than 500 of them.
   const pct = Math.round((done / total) * 100);
@@ -209,8 +216,12 @@ async function main(): Promise<void> {
     console.log(`  ${droppedImages} attachment(s) over the per-record cap were dropped`);
   }
 
-  const subjects = new Set(records.map((r) => r.robloxId));
-  const alts = new Set(records.flatMap((r) => r.relatedAccounts.map((a) => a.robloxId)));
+  const subjects = new Set(
+    records.map((r) => `${r.subject?.platform ?? "roblox"}:${r.subject?.externalId ?? r.robloxId}`),
+  );
+  const alts = new Set(
+    records.flatMap((r) => r.relatedAccounts.map((a) => `${a.platform}:${a.externalId}`)),
+  );
   const discordIds = new Set(records.flatMap((r) => r.thread?.users.map((u) => u.id) ?? []));
   const attachments = records.reduce((sum, r) => sum + r.imageUrls.length, 0);
   const replies = records.reduce((sum, r) => sum + (r.thread?.messages.length ?? 0), 0);
@@ -235,7 +246,7 @@ async function main(): Promise<void> {
   /* ── write ── */
   console.log(`Importing with onConflict=${options.onConflict}…`);
   const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
-  const failures: { robloxId: string; message: string }[] = [];
+  const failures: { subject: string; message: string }[] = [];
   const touchedDiscordIds = new Set<string>();
   const imageCounts = { attached: 0, failed: 0 };
 
@@ -263,12 +274,12 @@ async function main(): Promise<void> {
     } catch (err) {
       counts.failed += 1;
       failures.push({
-        robloxId: record.robloxId,
+        subject: subjectLabel(record),
         message: err instanceof Error ? err.message : String(err),
       });
     }
     if (index % 10 === 0 || index === records.length - 1) {
-      progress(index + 1, records.length, record.robloxId);
+      progress(index + 1, records.length, subjectLabel(record));
     }
   }
   process.stdout.write("\n");
@@ -276,7 +287,7 @@ async function main(): Promise<void> {
   if (failures.length) {
     console.log(`\n${failures.length} record(s) failed:`);
     for (const failure of failures.slice(0, 20)) {
-      console.log(`  ${failure.robloxId}: ${failure.message}`);
+      console.log(`  ${failure.subject}: ${failure.message}`);
     }
   }
 
@@ -284,7 +295,7 @@ async function main(): Promise<void> {
     console.log(
       `\nAttachments: ${imageCounts.attached} converted, ${imageCounts.failed} unreachable` +
         (imageCounts.failed
-          ? " (Discord attachment links expire — a stale scrape mostly 404s)"
+          ? " (Discord attachment links expire - a stale scrape mostly 404s)"
           : ""),
     );
   }
@@ -309,7 +320,7 @@ async function main(): Promise<void> {
 
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(
-    `\nDone in ${seconds}s — created ${counts.created}, updated ${counts.updated}, ` +
+    `\nDone in ${seconds}s - created ${counts.created}, updated ${counts.updated}, ` +
       `skipped ${counts.skipped}, failed ${counts.failed}.`,
   );
 }

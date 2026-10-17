@@ -23,7 +23,7 @@ declare module "fastify" {
 /**
  * The raw-text data API: `api.domain.com/digitalarchive/v1/...`
  *
- * Everything that is JSON lives here — the archive itself, search, the
+ * Everything that is JSON lives here - the archive itself, search, the
  * moderation trail, auth and ingress. Image bytes are a separate service
  * behind a separate tunnel so a flood of image traffic cannot starve the
  * archive's reads, and so the two can be scaled, cached and restarted
@@ -105,10 +105,10 @@ export async function buildTextApp(): Promise<FastifyInstance> {
           version: 1,
           endpoints: {
             stats: "GET /stats",
-            subjects: "GET /subjects",
-            subject: "GET /roblox-modlogs/:robloxId",
-            modlog: "GET /roblox-modlogs/:robloxId/:logId",
-            image: "GET /roblox-modlogs/:robloxId/:logId/:imageId",
+            subjects: "GET /subjects?platform=",
+            subject: "GET /{roblox|discord}-modlogs/:accountId",
+            modlog: "GET /{roblox|discord}-modlogs/:accountId/:logId",
+            image: "GET /{roblox|discord}-modlogs/:accountId/:logId/:imageId",
             search: "GET /search?q=",
             revisions: "GET /modlogs/:id/revisions",
             moderators: "GET /moderators",

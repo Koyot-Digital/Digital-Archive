@@ -1,9 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { desc, eq, inArray } from "drizzle-orm";
-import { apiKeyCreateSchema, auditQuerySchema, roleChangeSchema } from "@archive/shared";
+import {
+  apiKeyCreateSchema,
+  auditQuerySchema,
+  roleChangeSchema,
+  subjectArchivePath,
+} from "@archive/shared";
 import { db } from "../../db/client.js";
-import { modlogs, users } from "../../db/schema.js";
+import { modlogs, subjects, users } from "../../db/schema.js";
 import { listAudit, recordAudit } from "../../services/audit.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../services/apikeys.js";
 import { destroyAllSessionsFor } from "../../auth/session.js";
@@ -13,7 +18,7 @@ import { idParam } from "../helpers.js";
 
 /**
  * Moderation surface: the audit trail, the review queue, credentials and
- * roles. Everything here is private — `no-store` on every response — and
+ * roles. Everything here is private - `no-store` on every response - and
  * every mutation writes its own audit row.
  */
 export async function moderationRoutes(app: FastifyInstance): Promise<void> {
@@ -55,7 +60,9 @@ export async function moderationRoutes(app: FastifyInstance): Promise<void> {
       const rows = await db
         .select({
           id: modlogs.id,
-          robloxId: modlogs.robloxId,
+          subjectId: modlogs.subjectId,
+          platform: subjects.platform,
+          externalId: subjects.externalId,
           title: modlogs.title,
           status: modlogs.status,
           action: modlogs.action,
@@ -65,6 +72,7 @@ export async function moderationRoutes(app: FastifyInstance): Promise<void> {
           updatedAt: modlogs.updatedAt,
         })
         .from(modlogs)
+        .innerJoin(subjects, eq(subjects.id, modlogs.subjectId))
         .where(inArray(modlogs.status, ["hidden", "removed"]))
         .orderBy(desc(modlogs.updatedAt))
         .limit(limit)
@@ -73,9 +81,9 @@ export async function moderationRoutes(app: FastifyInstance): Promise<void> {
       return {
         items: rows.map((r) => ({
           ...r,
-          robloxId: r.robloxId.toString(),
+          externalId: r.externalId.toString(),
           updatedAt: r.updatedAt.toISOString(),
-          url: `/roblox-modlogs/${r.robloxId.toString()}/${r.id}`,
+          url: `${subjectArchivePath(r.platform, r.externalId.toString())}/${r.id}`,
         })),
         page,
         limit,
@@ -112,7 +120,7 @@ export async function moderationRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Change someone's role.
    *
-   * An admin cannot demote themselves — that is the one guardrail that stops
+   * An admin cannot demote themselves - that is the one guardrail that stops
    * a mis-click leaving the archive with no administrator at all.
    */
   app.post(

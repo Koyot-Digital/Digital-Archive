@@ -10,7 +10,7 @@ import { migrate } from "../db/migrate.js";
  *   pnpm apikey "nightly scraper" ingress:write,images:write [ratePerMin] [expiresDays]
  *
  * The secret is printed once. There is no way to recover it afterwards, by
- * design — only its hash is stored.
+ * design - only its hash is stored.
  */
 
 const [, , nameArg, scopesArg, rateArg, daysArg] = process.argv;

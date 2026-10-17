@@ -12,7 +12,7 @@ import { visibilityOf } from "../helpers.js";
 /**
  * Image delivery.
  *
- * An id never changes what it points at — a re-upload produces a new id — so
+ * An id never changes what it points at - a re-upload produces a new id - so
  * responses are `immutable` with a one-year TTL and Cloudflare serves almost
  * all of this traffic without touching the homeserver at all.
  */
@@ -36,7 +36,7 @@ interface CachedMeta {
   bytes: number;
   thumbBytes: number;
   modlogId: string;
-  robloxId: string;
+  subjectId: string;
   caption: string | null;
   blurDataUrl: string | null;
   createdAt: string;
@@ -62,7 +62,7 @@ async function metaFor(id: string): Promise<CachedMeta | null> {
       bytes: row.bytes,
       thumbBytes: row.thumbBytes,
       modlogId: row.modlogId,
-      robloxId: row.robloxId.toString(),
+      subjectId: row.subjectId,
       caption: row.caption,
       blurDataUrl: row.blurDataUrl,
       createdAt: row.createdAt.toISOString(),
@@ -115,7 +115,7 @@ export async function imageServeRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(openVariant(id, variant));
   });
 
-  /** Metadata without the bytes — used by the embed viewer. */
+  /** Metadata without the bytes - used by the embed viewer. */
   app.get("/images/:id/meta", async (req, reply) => {
     const { id } = serveParams.parse(req.params);
     const meta = await metaFor(id);
@@ -128,7 +128,9 @@ export async function imageServeRoutes(app: FastifyInstance): Promise<void> {
         ...meta,
         url: `/images/${meta.id}.webp`,
         thumbUrl: `/images/${meta.id}.webp?v=thumb`,
-        pageUrl: `/roblox-modlogs/${meta.robloxId}/${meta.modlogId}/${meta.id}`,
+        // The viewer page lives under the subject's platform path. This
+        // service holds image bytes and deliberately does not join subjects,
+        // so the link is built by the text API, which already has it.
         compressionRatio:
           meta.originalBytes > 0 ? 1 - meta.bytes / meta.originalBytes : 0,
       },

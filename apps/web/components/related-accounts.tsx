@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { RELATION_LABELS, type SubjectRelation } from "@archive/shared";
+import { PLATFORM_LABELS, RELATION_LABELS, type SubjectRelation } from "@archive/shared";
 import type { RelatedAccount } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 import { IconAccounts, IconInfo, IconMovedFrom, IconMovedTo, IconRelated } from "./icons";
@@ -9,12 +9,12 @@ import { IconAccounts, IconInfo, IconMovedFrom, IconMovedTo, IconRelated } from 
  *
  * This is the panel that keeps the archive honest about alts. One sanction
  * announced against four accounts is filed as one record, under the first
- * account named — which means the other three have pages showing zero
+ * account named - which means the other three have pages showing zero
  * records. Without this panel those pages would read as "nothing archived"
  * when the truth is "the record is filed next door", and that is precisely
  * the misreading an archive must not invite.
  *
- * The relation used to be spelled out twice per group — a heading and a
+ * The relation used to be spelled out twice per group - a heading and a
  * sentence of explanation. Now the glyph carries it: an arrow out for an
  * account that moved on, an arrow in for the one it came from, two figures
  * for alts, a broken link for an unstated association. Each row's tooltip and
@@ -68,20 +68,20 @@ export function RelatedAccounts({
 
               <ul className="flex flex-wrap gap-1.5">
                 {items.map((account) => (
-                  <li key={account.robloxId}>
+                  <li key={account.externalId}>
                     <Link
                       href={account.archiveUrl}
                       className="group flex items-baseline gap-2 rounded-md border border-line bg-surface px-2.5 py-1 transition-colors hover:border-line-strong"
-                      title={`${account.username ?? "Unnamed account"} (${account.robloxId}) — ${
+                      title={`${account.username ?? "Unnamed account"} (${account.externalId}) - ${
                         account.logCount
                           ? `${formatNumber(account.logCount)} record${account.logCount === 1 ? "" : "s"} of its own`
                           : "no records of its own"
                       }`}
                     >
                       <span className="link-block text-sm font-medium text-fg">
-                        {account.username ?? `Roblox ${account.robloxId}`}
+                        {account.username ?? `${PLATFORM_LABELS[account.platform]} ${account.externalId}`}
                       </span>
-                      <span className="font-mono text-2xs text-faint">{account.robloxId}</span>
+                      <span className="font-mono text-2xs text-faint">{account.externalId}</span>
                       {/* A bare count, because the tooltip spells it out and a
                           zero here is the whole point of the panel. */}
                       <span className="text-2xs tabular-nums text-muted">
@@ -100,7 +100,7 @@ export function RelatedAccounts({
         <IconInfo className="icon-sm mt-[0.1rem]" />
         <span>
           Claims made by moderators in the source thread titles, not verified identities. The
-          number is each account&apos;s own records — a zero may still be covered by a record filed
+          number is each account&apos;s own records - a zero may still be covered by a record filed
           here.{" "}
           {accounts.some((a) => a.assertedBy) ? (
             <>
@@ -109,7 +109,7 @@ export function RelatedAccounts({
                 .filter((a) => a.assertedBy)
                 .slice(0, 3)
                 .map((account, index) => (
-                  <span key={account.robloxId}>
+                  <span key={account.externalId}>
                     {index > 0 ? ", " : ""}
                     {/* Flat id route: the asserting record is filed under the
                         primary account, which is not necessarily this page. */}

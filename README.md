@@ -30,14 +30,28 @@ and each surface gets its own edge cache rules and its own failure domain.
 Public web interface:
 
 ```
-archive.domain.com/roblox-modlogs/<robloxId>                        all records for an account
-archive.domain.com/roblox-modlogs/<robloxId>/<16-char id>           one record
-archive.domain.com/roblox-modlogs/<robloxId>/<16-char id>/<img id>  one piece of evidence
+archive.domain.com/roblox-modlogs/<robloxId>                         all records for an account
+archive.domain.com/roblox-modlogs/<robloxId>/<16-char id>            one record
+archive.domain.com/roblox-modlogs/<robloxId>/<16-char id>/<img id>   one piece of evidence
+
+archive.domain.com/discord-modlogs/<discordId>                       the same, for a Discord account
+archive.domain.com/discord-modlogs/<discordId>/<16-char id>
+archive.domain.com/discord-modlogs/<discordId>/<16-char id>/<img id>
 ```
 
 ```
-archive.domain.com/moderators                                       who files records here
+archive.domain.com/subjects?platform=discord                         accounts, filtered
+archive.domain.com/moderators                                        who files records here
 ```
+
+**Two platforms, two namespaces.** A subject is an account on *one* platform,
+identified by `(platform, id)`. Roblox ids are 11 digits and Discord
+snowflakes are 19, so they do not collide today - but the archive does not
+rely on that: the same digits under `/roblox-modlogs/` and
+`/discord-modlogs/` are two different subjects, and one 404s where the other
+resolves. It also means a Discord subject's page links to no external
+profile, because Discord has no public page for a bare user id and inventing
+one would be worse than omitting it.
 
 API:
 
@@ -67,7 +81,7 @@ make seed             # sample records so the UI is not empty
 make dev              # api-text :4001 · api-images :4002 · web :3000
 ```
 
-Point `DATABASE_URL` and `REDIS_URL` at `127.0.0.1` for a non-Docker run —
+Point `DATABASE_URL` and `REDIS_URL` at `127.0.0.1` for a non-Docker run -
 `.env.example` has both lines commented out ready to swap. `make dev` reads
 the repo-root `.env` for all three services, so it is the only file to edit.
 
@@ -110,7 +124,7 @@ curl -X POST https://api.domain.com/digitalarchive/v1/ingress \
     "records": [{
       "robloxId": 156,
       "username": "builderman",
-      "title": "7-day suspension — harassment in experience chat",
+      "title": "7-day suspension - harassment in experience chat",
       "body": "Markdown. Any link in here becomes an embed card.",
       "action": "temp_ban",
       "severity": "high",
@@ -135,7 +149,7 @@ What the endpoint guarantees:
 - **Deduplicated** on `source` + `sourceId`. Omit `sourceId` and the server
   derives one from the content, so a re-scrape still matches.
 - **Non-destructive by default.** `onConflict: "merge"` updates a record
-  *unless a human has edited it* — a nightly re-scrape can never silently
+  *unless a human has edited it* - a nightly re-scrape can never silently
   revert a moderator's correction.
 - **Fast to call.** Image fetching and link unfurling happen after the
   response is sent.
@@ -163,7 +177,7 @@ pnpm import:forum ./roblox-modlogs-….jsonl --images
 ```
 
 **The mapping happens server-side, on purpose.** Reading one of these threads
-means knowing that the subject is the first Roblox id in the title, that
+means knowing that the subject is the first account id in the title, that
 `;tban Name 3d reason` is a three-day suspension, that a `~~struck-through~~`
 command followed by a `;pban` is an *escalation* rather than two sanctions,
 and that `A (1) --> B (2)` names one account that moved rather than two that
@@ -171,13 +185,33 @@ offended. Those rules are the archive's reading of its own source and they
 change; keeping them in the API means a re-parse is one deploy, and the
 scraper can never hold a second, quietly different interpretation.
 
+**Two forums, two dialects.** The same scraper feeds both, and the mapper
+picks the dialect from the forum name:
+
+| | `roblox-modlogs` | `discord-modlogs` |
+| --- | --- | --- |
+| subject | a Roblox account | a Discord account |
+| body | bot commands - `;tban wojtek3441 2d …` | prose - `2 day mute for channel misuse` |
+| source | `discord-forum` | `discord-modlogs` |
+
+The Discord-side bodies are a staff channel talking to itself, so the parser
+there stops looking for a grammar and finds the three facts independently
+anywhere in the line: which sanction word appears, what duration appears, and
+what is left once the bot prefix and target id are stripped. Order carries no
+meaning - `mute 6d toxicity`, `2 day mute for …`, `Offensive image mute 4d`
+and `1d mute initially was gonna warn` are all the same shape of event.
+
 What comes out of one thread:
 
 | From the thread | Becomes |
 | --- | --- |
-| `wojtek3441 (2555684412) (#6066)` | subject `2555684412`, ticket `#6066` |
+| `wojtek3441 (2555684412) (#6066)` | Roblox subject `2555684412`, ticket `#6066` |
+| `Valensrutto (499982091824398351)` | Discord subject `499982091824398351` |
 | `;tban wojtek3441 2d Intentional disruption…` | `temp_ban`, `medium`, 2 days, that reason |
+| `mute 7d ban evasion` | `mute`, `medium`, 7 days - *not* a ban |
+| `perm ban ban evasion` | `ban`, `critical`, no end date |
 | `MRLAZY295 (…) mrlazy296 (…) All Alts` | one record + three grouped accounts |
+| `onursayim (3111…), 1zuus (10056874902)` | a Discord subject linked to a Roblox account |
 | the 21 replies | the record's thread, with avatars and names |
 | the attachments | WebP evidence, as with any other image |
 
@@ -185,7 +219,7 @@ A thread whose title names no Roblox id has no subject to be filed under, so
 it comes back under `unmapped` with a reason rather than failing the batch or
 being silently dropped.
 
-Everything on the thread is attributed. `DISCORD_BOT_TOKEN` is optional —
+Everything on the thread is attributed. `DISCORD_BOT_TOKEN` is optional -
 without it the archive shows the usernames and avatars the scrape captured and
 labels them *as scraped*; with it, identities are refreshed from
 `GET /users/{id}` after the response is sent, cached for
@@ -201,7 +235,7 @@ Everything that enters the archive is re-encoded. A typical 4MB screenshot PNG
 lands around 150–350KB.
 
 - **Magic-byte sniffed**, not trusted by declared content type.
-- **Re-encoded through sharp** to WebP — which also discards EXIF (screenshots
+- **Re-encoded through sharp** to WebP - which also discards EXIF (screenshots
   routinely carry device and GPS data), strips ICC payloads, and guarantees the
   stored bytes are an image rather than a polyglot file with something stapled
   on.
@@ -232,7 +266,7 @@ Reading is public. Writing is not.
 | `admin` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | API key | ✅ | only with `moderation:read` | with `ingress:write` | | |
 
-Roles come from `ADMIN_DISCORD_IDS` / `MODERATOR_DISCORD_IDS` in `.env` —
+Roles come from `ADMIN_DISCORD_IDS` / `MODERATOR_DISCORD_IDS` in `.env` -
 there is no in-app path to grant yourself privileges. An existing user keeps a
 hand-set role unless the allowlist grants a higher one, so promotion is a
 config change and demotion is an explicit admin action that also kills the
@@ -243,12 +277,12 @@ records but can never read the audit trail or touch a role.
 
 ### Hardening notes
 
-- Session tokens are stored as SHA-256 only — a database dump yields no
+- Session tokens are stored as SHA-256 only - a database dump yields no
   replayable logins. Cookies are HMAC-signed, `httpOnly`, `SameSite=Lax`,
   `Secure` in production.
 - The audit log is append-only by a Postgres `RULE`: rewriting history is
   impossible even for the table owner. `DELETE` is left available for
-  retention pruning — withhold it from the app role (see below).
+  retention pruning - withhold it from the app role (see below).
 - `/ingress` optionally requires `X-Archive-Signature: sha256=<hex>` over the
   raw request body, verified against the exact bytes sent.
 - Outbound fetches (link unfurling, remote image fetch) resolve DNS and reject
@@ -258,7 +292,7 @@ records but can never read the audit trail or touch a role.
   sanitize-html), with no inline styles and every outbound link forced to
   `noopener noreferrer nofollow ugc`.
 - Rate limits are keyed per API key when one is present, so one scraper cannot
-  consume another's budget. The limiter fails *open* if Redis dies — the
+  consume another's budget. The limiter fails *open* if Redis dies - the
   archive stays readable.
 
 To take `DELETE` on the audit trail away from the application:
@@ -281,16 +315,30 @@ apps/api/            one codebase, two entrypoints
                        threads · discord-users
   src/scripts/         migrate · seed · apikey · import-forum-scrape
 apps/web/            Next.js 15 App Router, server components
-packages/shared/     ids, zod schemas, link classification — used by both
-                     discord.ts      forum title + command parsing
+packages/shared/     ids, zod schemas, link classification - used by both
+                     discord.ts      title parsing, both body dialects,
+                                     platform discrimination
                      forum-record.ts forum thread → archive record
 infra/caddy/         internal reverse proxy, one listener per tunnel
 infra/cloudflared/   tunnel + edge cache setup
 ```
 
 Parsing lives in `packages/shared` rather than in the API because the web app
-renders the same vocabulary the parser produces — relations, thread roles,
-severity from ban length — and two copies of that vocabulary would drift.
+renders the same vocabulary the parser produces - platforms, relations, thread
+roles, severity from ban length - and two copies of that vocabulary would
+drift.
+
+### Why subjects have a surrogate key
+
+`subjects` is keyed on a 16-char id with `(platform, external_id)` unique
+beside it, and `modlogs`, `images` and `subject_relations` all reference that
+id. The alternative - keying on the account number itself - breaks the moment
+a second platform arrives: two id spaces in one integer column cannot be
+guaranteed collision-free, and a grouping row joining a Discord snowflake to
+a Roblox id has no meaning as a pair of bare integers. Migration `0003` is
+that change; it rewrites three foreign keys, so it derives the backfilled ids
+deterministically from `md5(platform:external_id)` rather than at random, to
+stay re-runnable and identical on a replica.
 
 Both API services run from the same image with different commands. They share
 the schema, the services layer and the security stack; what differs is which
@@ -317,7 +365,7 @@ make restart-api              # rebuild just the two API services
 ```
 
 Health: `/health` on both API services (outside the versioned prefix), and
-Postgres is the only hard dependency — Redis being down degrades caching and
+Postgres is the only hard dependency - Redis being down degrades caching and
 rate limiting but does not take the archive offline.
 
 Backups cover two things: the Postgres dump above, and the
@@ -331,7 +379,7 @@ not a complete backup.
 **Greyscale, with no hue at all.** Every palette token is a true grey, in both
 themes. Two consequences, both handled rather than tolerated:
 
-- **Severity cannot be a colour scale**, so it is drawn as a stepped meter —
+- **Severity cannot be a colour scale**, so it is drawn as a stepped meter -
   one filled bar for `info` up to five for `critical`. Rank reads as a
   *quantity* rather than as a shade, which matters because adjacent greys sit
   only ~1.5:1 apart and value alone would be unreliable. The accessible name
@@ -342,7 +390,7 @@ themes. Two consequences, both handled rather than tolerated:
 
 **Icons carry the chrome; words carry the meaning.** Reply and attachment
 counts, ticket references, thread state, relations and the provenance sidebar
-are glyphs plus a number, with the phrase in `title` and an `sr-only` label —
+are glyphs plus a number, with the phrase in `title` and an `sr-only` label -
 a tooltip is not readable by a screen reader and is unreachable by touch, so
 icons standing in for text always have both. What stays in words is the
 record's substance: the action, the severity label, the status of a withheld
@@ -350,7 +398,7 @@ record. There is no icon vocabulary for "content deletion" that a reader
 would know without being taught one.
 
 The set is hand-written inline SVG in
-[`components/icons.tsx`](apps/web/components/icons.tsx) — two dozen glyphs on
+[`components/icons.tsx`](apps/web/components/icons.tsx) - two dozen glyphs on
 a 24-unit grid, stroked in `currentColor`, shipped in the server-rendered HTML
 with no extra request and no dependency.
 
@@ -365,7 +413,7 @@ severity ramp must clear 3:1 and stay monotonic. It runs as part of
 
 - The web UI is read-only. Creating and editing records goes through the API
   (`POST /modlogs`, `PATCH /modlogs/:id`); there is no editor form yet.
-- Image uploads from the browser are not wired to a UI either — the endpoint
+- Image uploads from the browser are not wired to a UI either - the endpoint
   exists and takes multipart, but you will be using `curl` or the scraper.
 - No automated tests beyond the palette check above. The type system and the
   database constraints carry more weight than usual as a result.

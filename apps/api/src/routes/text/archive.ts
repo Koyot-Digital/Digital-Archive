@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  PLATFORM_PATHS,
+  SUBJECT_PLATFORMS,
+  subjectOf,
   listModlogsQuerySchema,
   listSubjectsQuerySchema,
   searchQuerySchema,
@@ -8,7 +11,7 @@ import {
   modlogUpdateSchema,
   statusChangeSchema,
 } from "@archive/shared";
-import { notFound } from "../../lib/errors.js";
+import { badRequest, notFound } from "../../lib/errors.js";
 import { recordAudit } from "../../services/audit.js";
 import { imageStats } from "../../services/images.js";
 import { unfurlLinksFor } from "../../services/links.js";
@@ -24,7 +27,7 @@ import {
   setStatus,
   updateModlog,
 } from "../../services/modlogs.js";
-import { getSubject, listSubjects } from "../../services/subjects.js";
+import { getSubject, listSubjects, subjectPlatformCounts } from "../../services/subjects.js";
 import { getRelatedAccounts } from "../../services/threads.js";
 import {
   getDiscordUser,
@@ -34,11 +37,11 @@ import {
 } from "../../services/discord-users.js";
 import { actorOf } from "../../auth/plugin.js";
 import {
+  accountIdParam,
+  accountImageParams,
+  accountLogParams,
   actorFor,
   idParam,
-  imageParams,
-  logParams,
-  robloxIdParam,
   setReadCache,
   visibilityOf,
 } from "../helpers.js";
@@ -63,7 +66,11 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
   app.get("/subjects", async (req, reply) => {
     const query = listSubjectsQuerySchema.parse(req.query);
     setReadCache(reply, visibilityOf(req), 60);
-    return listSubjects(query);
+    const [page, platforms] = await Promise.all([
+      listSubjects(query),
+      subjectPlatformCounts(),
+    ]);
+    return { ...page, platforms };
   });
 
   app.get("/modlogs", async (req, reply) => {
@@ -80,64 +87,83 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     return searchModlogs(query, visibility);
   });
 
-  /**
-   * Everything the archive holds about one Roblox account.
+  /*
+   * Subject routes, registered once per platform.
    *
-   * `relatedAccounts` is part of this response rather than a separate call:
-   * an alt grouping is the first thing a reader needs in order to trust a
-   * page that says "no records" — the sanction may be filed under the main.
+   * `/roblox-modlogs/:account` and `/discord-modlogs/:account` are the same
+   * three handlers over a different platform, and they mirror the public web
+   * URLs one-for-one so a page render is one fetch of exactly the thing being
+   * rendered. Generated in a loop rather than written twice, because the day
+   * they drift is the day one platform quietly loses a visibility check.
    */
-  app.get("/roblox-modlogs/:robloxId", async (req, reply) => {
-    const { robloxId } = robloxIdParam.parse(req.params);
-    const query = listModlogsQuerySchema.parse(req.query);
-    const visibility = visibilityOf(req);
+  for (const platform of SUBJECT_PLATFORMS) {
+    const base = `/${PLATFORM_PATHS[platform]}`;
 
-    const [subject, page, relatedAccounts] = await Promise.all([
-      getSubject(robloxId),
-      listModlogsForSubject(robloxId, query, visibility),
-      getRelatedAccounts(robloxId),
-    ]);
+    /**
+     * Everything the archive holds about one account.
+     *
+     * `relatedAccounts` is part of this response rather than a separate call:
+     * an alt grouping is the first thing a reader needs in order to trust a
+     * page that says "no records" - the sanction may be filed under the main,
+     * and on the Discord side possibly under a Roblox account entirely.
+     */
+    app.get(`${base}/:accountId`, async (req, reply) => {
+      const { accountId } = accountIdParam.parse(req.params);
+      const query = listModlogsQuerySchema.parse(req.query);
+      const visibility = visibilityOf(req);
 
-    setReadCache(reply, visibility, 60);
-    return { subject, relatedAccounts, ...page };
-  });
+      const subject = await getSubject(platform, accountId);
+      const [page, relatedAccounts] = await Promise.all([
+        listModlogsForSubject(subject.id, query, visibility),
+        getRelatedAccounts(subject.id),
+      ]);
 
-  /** One modlog, with images, link embeds and the subject inlined. */
-  app.get("/roblox-modlogs/:robloxId/:logId", async (req, reply) => {
-    const { robloxId, logId } = logParams.parse(req.params);
-    const visibility = visibilityOf(req);
-    const modlog = await getModlog(logId, visibility, robloxId);
-    setReadCache(reply, visibility, 120);
-    return { modlog };
-  });
+      setReadCache(reply, visibility, 60);
+      return { subject, relatedAccounts, ...page };
+    });
 
-  /**
-   * Metadata for one embedded image, plus its siblings so the viewer can
-   * page through the evidence without another round trip. The bytes
-   * themselves come from the images service.
-   */
-  app.get("/roblox-modlogs/:robloxId/:logId/:imageId", async (req, reply) => {
-    const { robloxId, logId, imageId } = imageParams.parse(req.params);
-    const visibility = visibilityOf(req);
-    const { image, modlog, siblings } = await getImageForRoute(
-      robloxId,
-      logId,
-      imageId,
-      visibility,
-    );
-    setReadCache(reply, visibility, 300);
-    return {
-      image,
-      siblings,
-      modlog: {
-        id: modlog.id,
-        robloxId: modlog.robloxId,
-        title: modlog.title,
-        url: modlog.url,
-        subject: modlog.subject,
-      },
-    };
-  });
+    /** One modlog, with images, link embeds and the subject inlined. */
+    app.get(`${base}/:accountId/:logId`, async (req, reply) => {
+      const { accountId, logId } = accountLogParams.parse(req.params);
+      const visibility = visibilityOf(req);
+      // Resolving the subject first is what makes the platform part of the
+      // check: /roblox-modlogs/<snowflake>/<log> must not find a record.
+      const subject = await getSubject(platform, accountId);
+      const modlog = await getModlog(logId, visibility, subject.id);
+      setReadCache(reply, visibility, 120);
+      return { modlog };
+    });
+
+    /**
+     * Metadata for one embedded image, plus its siblings so the viewer can
+     * page through the evidence without another round trip. The bytes
+     * themselves come from the images service.
+     */
+    app.get(`${base}/:accountId/:logId/:imageId`, async (req, reply) => {
+      const { accountId, logId, imageId } = accountImageParams.parse(req.params);
+      const visibility = visibilityOf(req);
+      const subject = await getSubject(platform, accountId);
+      const { image, modlog, siblings } = await getImageForRoute(
+        subject.id,
+        logId,
+        imageId,
+        visibility,
+      );
+      setReadCache(reply, visibility, 300);
+      return {
+        image,
+        siblings,
+        modlog: {
+          id: modlog.id,
+          platform: modlog.platform,
+          externalId: modlog.externalId,
+          title: modlog.title,
+          url: modlog.url,
+          subject: modlog.subject,
+        },
+      };
+    });
+  }
 
   /** Flat id lookup, for when the caller does not know the subject. */
   app.get("/modlogs/:id", async (req, reply) => {
@@ -171,7 +197,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
    * Who files records here, derived from the records themselves.
    *
    * Not a configured staff list: it is a fact about what is in the archive,
-   * so it cannot fall out of step with it. Cached for an hour — the set of
+   * so it cannot fall out of step with it. Cached for an hour - the set of
    * people writing moderation logs changes on the scale of months.
    */
   app.get("/moderators", async (req, reply) => {
@@ -244,9 +270,16 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: app.requireWriter("moderator", "ingress:write") },
     async (req, reply) => {
       const input = modlogCreateSchema.parse(req.body);
+      const subject = subjectOf(input);
+      if (!subject) {
+        throw badRequest(
+          "supply either robloxId or subject.{platform,externalId} to say who this record is about",
+        );
+      }
       const modlog = await createModlog(
         {
           ...input,
+          subject,
           occurredAt: input.occurredAt,
         },
         actorFor(req),
@@ -257,7 +290,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         action: "modlog.create",
         targetType: "modlog",
         targetId: modlog.id,
-        metadata: { robloxId: modlog.robloxId, source: modlog.source, title: modlog.title },
+        metadata: {
+          platform: modlog.platform,
+          externalId: modlog.externalId,
+          source: modlog.source,
+          title: modlog.title,
+        },
         ip: req.ip,
         userAgent: req.headers["user-agent"],
       });

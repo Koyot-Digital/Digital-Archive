@@ -33,7 +33,7 @@ export interface ParsedLink {
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|tiff?)(?:$|\?)/i;
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(?:$|\?)/i;
 
-/** Hosts we will never unfurl or linkify — avoids SSRF against the LAN. */
+/** Hosts we will never unfurl or linkify - avoids SSRF against the LAN. */
 const BLOCKED_HOST = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|\[?::1\]?$|.*\.local$|.*\.internal$)/i;
 
 export function isSafeHttpUrl(raw: string): boolean {

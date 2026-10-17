@@ -27,7 +27,7 @@ const samples = [
     title: "Account flagged by automated filter",
     body: `The automated content filter flagged three uploads in quick succession.
 
-Reviewed manually and **cleared** — the filter matched on a false positive in the
+Reviewed manually and **cleared** - the filter matched on a false positive in the
 asset description. Reference: https://www.roblox.com/users/1/profile
 
 See also the original report thread: https://devforum.roblox.com/`,
@@ -44,19 +44,19 @@ See also the original report thread: https://devforum.roblox.com/`,
     robloxId: "156",
     username: "builderman",
     displayName: "builderman",
-    title: "7-day suspension — harassment in experience chat",
+    title: "7-day suspension - harassment in experience chat",
     body: `Multiple reports of targeted harassment in the chat of a public experience.
 
 ### Timeline
-- 09:12 — first report filed
-- 09:48 — second and third reports, same reporter group
-- 10:30 — logs reviewed, suspension applied
+- 09:12 - first report filed
+- 09:48 - second and third reports, same reporter group
+- 10:30 - logs reviewed, suspension applied
 
 Chat excerpts are attached as evidence. The account has one prior warning on
 file from 2025.`,
     action: "temp_ban" as const,
     severity: "high" as const,
-    reason: "Harassment — repeated targeting after warning",
+    reason: "Harassment - repeated targeting after warning",
     source: "seed",
     sourceId: "seed-2",
     tags: ["harassment", "chat", "repeat"],
@@ -66,7 +66,7 @@ file from 2025.`,
   {
     robloxId: "156",
     username: "builderman",
-    title: "Prior warning — mild profanity",
+    title: "Prior warning - mild profanity",
     body: "Single instance of filtered profanity bypass. Warning issued, no further action.",
     action: "warning" as const,
     severity: "low" as const,
@@ -81,14 +81,14 @@ file from 2025.`,
     robloxId: "261",
     username: "Shedletsky",
     displayName: "Shedletsky",
-    title: "Content deletion — asset reuploaded without licence",
+    title: "Content deletion - asset reuploaded without licence",
     body: `Asset was a direct reupload of a third-party model. Removed under the
 DMCA process. Original author contacted and confirmed the claim.
 
 Takedown notice: https://www.roblox.com/info/dmca`,
     action: "content_deletion" as const,
     severity: "medium" as const,
-    reason: "Copyright — unlicensed reupload",
+    reason: "Copyright - unlicensed reupload",
     source: "seed",
     sourceId: "seed-4",
     tags: ["dmca", "copyright", "asset"],

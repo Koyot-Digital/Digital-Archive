@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ID_PATTERN, ROBLOX_ID_PATTERN, normalizeId, roleAtLeast } from "@archive/shared";
+import { ID_PATTERN, normalizeId, roleAtLeast } from "@archive/shared";
 import { badRequest } from "../lib/errors.js";
 import type { Visibility } from "../services/modlogs.js";
 
@@ -15,16 +15,27 @@ export function parse<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infe
  * Public ids are normalised (lowercased, ambiguous characters folded) before
  * validation, so an id transcribed from a screenshot still resolves.
  */
-export const robloxIdParam = z.object({
-  robloxId: z.string().regex(ROBLOX_ID_PATTERN, "invalid Roblox user id"),
-});
+/**
+ * An account id in a URL path.
+ *
+ * Shared by both platforms: a Roblox user id and a Discord snowflake are both
+ * bare positive integers, and which namespace a given path segment belongs to
+ * is decided by the route it arrived on, not by its shape. Validating the
+ * digits here and the platform there keeps the one real check - does this
+ * account exist on *this* platform - in a single place.
+ */
+const zAccountIdPath = z
+  .string()
+  .regex(/^[1-9][0-9]{0,19}$/, "invalid account id");
 
-export const logParams = z.object({
-  robloxId: z.string().regex(ROBLOX_ID_PATTERN, "invalid Roblox user id"),
+export const accountIdParam = z.object({ accountId: zAccountIdPath });
+
+export const accountLogParams = z.object({
+  accountId: zAccountIdPath,
   logId: z.string().transform(normalizeId).refine((v) => ID_PATTERN.test(v), "invalid modlog id"),
 });
 
-export const imageParams = logParams.extend({
+export const accountImageParams = accountLogParams.extend({
   imageId: z
     .string()
     // Accept both /:imageId and /:imageId.webp
@@ -39,8 +50,8 @@ export const idParam = z.object({
 /**
  * What this viewer is allowed to see.
  *
- * Moderators see hidden and removed records; everyone else — including every
- * API key without `moderation:read` — sees only published ones.
+ * Moderators see hidden and removed records; everyone else - including every
+ * API key without `moderation:read` - sees only published ones.
  */
 export function visibilityOf(req: FastifyRequest): Visibility {
   if (req.auth.kind === "user" && roleAtLeast(req.auth.role, "moderator")) return "moderator";

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /*
- * Palette — neutral greyscale, no hue anywhere.
+ * Palette - neutral greyscale, no hue anywhere.
  *
  * Dark by default: an archive is a tool, and tools get stared at for a long
  * time. Light theme follows the OS preference unless the viewer pins one.
@@ -11,8 +11,8 @@
  * Every value is a true grey (R = G = B). That is a constraint with
  * consequences, and the rest of this file answers them:
  *
- *   * Severity cannot be a hue scale, so it is a *value* ramp — each step
- *     further from the background than the last — and it is always drawn with
+ *   * Severity cannot be a hue scale, so it is a *value* ramp - each step
+ *     further from the background than the last - and it is always drawn with
  *     the stepped meter glyph in components/icons.tsx, so the rank survives
  *     for anyone who cannot separate two adjacent greys. Colour is never the
  *     only carrier.
@@ -111,7 +111,7 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* A visible, consistent focus ring everywhere — the archive is keyboard-heavy. */
+  /* A visible, consistent focus ring everywhere - the archive is keyboard-heavy. */
   :focus-visible {
     @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-bg;
   }
@@ -244,7 +244,7 @@
   /*
    * Inline links.
    *
-   * With no hue to spend, a link cannot be "the blue text" — so it is the
+   * With no hue to spend, a link cannot be "the blue text" - so it is the
    * underlined text, permanently. The underline starts quiet and firms up on
    * hover, which keeps a paragraph readable while still being unmistakably
    * clickable at rest. Never swap this for a colour-only treatment.
@@ -269,7 +269,7 @@
    * Icon sizes.
    *
    * Two steps, and everything in components/icons.tsx goes through one of
-   * them — so this is the only place site-wide icon sizing is decided.
+   * them - so this is the only place site-wide icon sizing is decided.
    *
    * `--icon` (18px) is the default: section headings, the provenance
    * sidebar, link-embed cards, pagination chevrons. `--icon-sm` (15px) is for

@@ -17,7 +17,7 @@ export default function AboutPage() {
 
       <div className="prose-archive">
         <p>
-          This is a moderation-record archive. It collects publicly observable Roblox moderation
+          This is a moderation-record archive. It collects publicly observable Roblox and Discord moderation
           actions, stores the evidence that supports each one, and keeps the full history of every
           change made to a record after it was filed.
         </p>
@@ -26,11 +26,19 @@ export default function AboutPage() {
         <p>Every entry carries, at minimum:</p>
         <ul>
           <li>
-            <strong>A subject</strong> — the Roblox account the record is about, identified by its
-            numeric user ID rather than by a username, because usernames change.
+            <strong>A subject</strong> - the account the record is about, on either Roblox or
+            Discord, identified by its numeric ID on that platform rather than by a username,
+            because usernames change. The two are separate namespaces: the same digits on Roblox
+            and on Discord are two different accounts, and the archive never conflates them.
           </li>
           <li>
-            <strong>A source</strong> — which scraper or person filed it, and the URL it came from
+            <strong>Grouped accounts</strong>, where a record names more than one - alts, a
+            rename, or the Discord and Roblox accounts belonging to one person. One sanction
+            announced against four accounts stays one record, filed under the first account
+            named, with the others linked to it in both directions.
+          </li>
+          <li>
+            <strong>A source</strong> - which scraper or person filed it, and the URL it came from
             where one exists.
           </li>
           <li>
@@ -38,11 +46,11 @@ export default function AboutPage() {
             termination.
           </li>
           <li>
-            <strong>Evidence</strong> — screenshots, converted to WebP and served from a dedicated
+            <strong>Evidence</strong> - screenshots, converted to WebP and served from a dedicated
             image service, each with its own permanent URL.
           </li>
           <li>
-            <strong>A revision history</strong> — see below.
+            <strong>A revision history</strong> - see below.
           </li>
         </ul>
 
@@ -55,7 +63,7 @@ export default function AboutPage() {
         </p>
         <p>
           The moderation log is append-only at the database level. Entries cannot be edited or
-          deleted — not by a moderator, not by an administrator, and not by a compromised API
+          deleted - not by a moderator, not by an administrator, and not by a compromised API
           token.
         </p>
 
@@ -77,7 +85,7 @@ export default function AboutPage() {
         <p>
           This archive is not operated by Roblox Corporation and has no access to internal
           moderation systems. Everything here is derived from publicly visible information. An
-          absence of records means only that nothing has been archived — not that nothing happened.
+          absence of records means only that nothing has been archived - not that nothing happened.
         </p>
 
         <p>

@@ -1,5 +1,5 @@
 # Convenience targets. Everything here is a thin wrapper around pnpm or
-# docker compose — nothing is hidden behind make.
+# docker compose - nothing is hidden behind make.
 
 SHELL := /bin/sh
 COMPOSE := docker compose

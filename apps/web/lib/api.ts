@@ -1,9 +1,11 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { PLATFORM_PATHS } from "@archive/shared";
 import type {
   ModlogAction,
   ModlogSeverity,
   RecordStatus,
+  SubjectPlatform,
   SubjectRelation,
   ThreadRole,
   UserRole,
@@ -15,7 +17,7 @@ import type {
  * Reads go to the text service over the docker network (INTERNAL_TEXT_API),
  * never back out through the tunnel, so a page render is one hop. The
  * viewer's session cookie is forwarded so the API applies the same visibility
- * rules it would for a direct call — the web app has no privileges of its own
+ * rules it would for a direct call - the web app has no privileges of its own
  * and cannot see a hidden record the viewer could not.
  */
 
@@ -84,14 +86,19 @@ async function apiGet<T>(path: string, opts: FetchOptions = {}): Promise<T> {
 /* ─────────────────────────── response shapes ─────────────────────────── */
 
 export interface Subject {
-  robloxId: string;
+  /** Surrogate key. Stable across a rename on the platform itself. */
+  id: string;
+  platform: SubjectPlatform;
+  /** The account's id on its own platform. */
+  externalId: string;
   username: string | null;
   displayName: string | null;
   avatarUrl: string | null;
   logCount: number;
   firstLogAt: string | null;
   lastLogAt: string | null;
-  profileUrl: string;
+  /** Null for platforms with no addressable public profile, i.e. Discord. */
+  profileUrl: string | null;
   archiveUrl: string;
 }
 
@@ -124,8 +131,8 @@ export interface LinkEmbed {
 /**
  * A Discord account the archive knows about.
  *
- * `avatarUrl` is always a usable URL — the API substitutes Discord's own
- * default avatar rather than returning null — so nothing here has to decide
+ * `avatarUrl` is always a usable URL - the API substitutes Discord's own
+ * default avatar rather than returning null - so nothing here has to decide
  * what to draw in a gap.
  */
 export interface DiscordIdentity {
@@ -168,9 +175,16 @@ export interface Thread {
   messages: ThreadMessage[];
 }
 
-/** Another Roblox account grouped with this one. */
+/**
+ * Another account grouped with this one.
+ *
+ * Carries its own platform, because these groupings cross platforms: a
+ * Discord record routinely names the Roblox account behind the offender.
+ */
 export interface RelatedAccount {
-  robloxId: string;
+  subjectId: string;
+  platform: SubjectPlatform;
+  externalId: string;
   username: string | null;
   relation: SubjectRelation;
   logCount: number;
@@ -185,7 +199,10 @@ export interface Moderator extends DiscordIdentity {
 
 export interface Modlog {
   id: string;
-  robloxId: string;
+  subjectId: string;
+  platform: SubjectPlatform;
+  /** The subject's id on its own platform. */
+  externalId: string;
   title: string;
   excerpt: string;
   action: ModlogAction;
@@ -228,6 +245,7 @@ export interface ArchiveStats {
     images: number;
     sources: { source: string; count: number }[];
     actions: { action: string; count: number }[];
+    platforms: { platform: SubjectPlatform; subjects: number; modlogs: number }[];
     latestAt: string | null;
   };
   images: {
@@ -291,18 +309,31 @@ export const api = {
   recent: (params: { page?: number; limit?: number; action?: string; severity?: string } = {}) =>
     apiGet<Page<Modlog>>(`/modlogs${qs(params)}`, { revalidate: 30 }),
 
-  subjects: (params: { page?: number; limit?: number; q?: string; sort?: string } = {}) =>
-    apiGet<{ subjects: Subject[]; total: number; page: number; limit: number }>(
-      `/subjects${qs(params)}`,
-      { revalidate: 60 },
-    ),
+  subjects: (
+    params: { page?: number; limit?: number; q?: string; platform?: string; sort?: string } = {},
+  ) =>
+    apiGet<{
+      subjects: Subject[];
+      total: number;
+      page: number;
+      limit: number;
+      platforms: Record<string, number>;
+    }>(`/subjects${qs(params)}`, { revalidate: 60 }),
 
+  /**
+   * One account's records.
+   *
+   * The platform is part of the path, not a query parameter, because it is
+   * part of the account's identity - the same digits on the other platform
+   * are a different subject, and must 404 rather than silently resolve.
+   */
   subject: (
-    robloxId: string,
+    platform: SubjectPlatform,
+    accountId: string,
     params: { page?: number; limit?: number; action?: string; severity?: string; tag?: string; sort?: string } = {},
   ) =>
     apiGet<Page<Modlog> & { subject: Subject; relatedAccounts: RelatedAccount[] }>(
-      `/roblox-modlogs/${robloxId}${qs(params)}`,
+      `/${PLATFORM_PATHS[platform]}/${accountId}${qs(params)}`,
       { revalidate: 30 },
     ),
 
@@ -313,19 +344,28 @@ export const api = {
       { revalidate: 3600 },
     ),
 
-  modlog: (robloxId: string, logId: string) =>
-    apiGet<{ modlog: Modlog }>(`/roblox-modlogs/${robloxId}/${logId}`, { revalidate: 60 }),
+  modlog: (platform: SubjectPlatform, accountId: string, logId: string) =>
+    apiGet<{ modlog: Modlog }>(`/${PLATFORM_PATHS[platform]}/${accountId}/${logId}`, {
+      revalidate: 60,
+    }),
 
   /** Flat lookup, for when only the record id is known (audit links). */
   modlogById: (logId: string) =>
     apiGet<{ modlog: Modlog }>(`/modlogs/${logId}`, { revalidate: 60 }),
 
-  image: (robloxId: string, logId: string, imageId: string) =>
+  image: (platform: SubjectPlatform, accountId: string, logId: string, imageId: string) =>
     apiGet<{
       image: ArchiveImage;
       siblings: ArchiveImage[];
-      modlog: { id: string; robloxId: string; title: string; url: string; subject?: Subject };
-    }>(`/roblox-modlogs/${robloxId}/${logId}/${imageId}`, { revalidate: 300 }),
+      modlog: {
+        id: string;
+        platform: SubjectPlatform;
+        externalId: string;
+        title: string;
+        url: string;
+        subject?: Subject;
+      };
+    }>(`/${PLATFORM_PATHS[platform]}/${accountId}/${logId}/${imageId}`, { revalidate: 300 }),
 
   revisions: (logId: string) =>
     apiGet<{ modlogId: string; revisions: Revision[] }>(`/modlogs/${logId}/revisions`, {
@@ -345,7 +385,9 @@ export const api = {
     apiGet<{
       items: {
         id: string;
-        robloxId: string;
+        subjectId: string;
+        platform: SubjectPlatform;
+        externalId: string;
         title: string;
         status: string;
         action: string;

@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   FORUM_SOURCE,
+  subjectOf,
   forumIngressBatchSchema,
   forumPostToIngressRecord,
   ingressBatchSchema,
@@ -22,14 +23,14 @@ import { hasBotToken, resolveDiscordUsers } from "../services/discord-users.js";
 import { actorOf } from "../auth/plugin.js";
 
 /**
- * The ingress endpoints — where the scraper's JSON lands.
+ * The ingress endpoints - where the scraper's JSON lands.
  *
  * Design goals, in order:
  *  1. Idempotent. A cron that retries after a timeout must not double-write.
  *  2. Partial success. One malformed record out of 500 fails alone and is
  *     reported by index, so the scraper can fix and resubmit just that one.
- *  3. Cheap to call often. Everything slow — image conversion, link
- *     unfurling, Discord identity lookups — happens after the response is
+ *  3. Cheap to call often. Everything slow - image conversion, link
+ *     unfurling, Discord identity lookups - happens after the response is
  *     sent.
  *
  * There are two entry points over one implementation. `/ingress` takes
@@ -50,7 +51,7 @@ function fingerprint(raw: string): string {
  * Optional payload signature, in addition to the API key.
  *
  * The signature covers the exact bytes sent, which the custom JSON parser
- * kept on req.rawBody — re-serialising the parsed object would reorder keys
+ * kept on req.rawBody - re-serialising the parsed object would reorder keys
  * and change whitespace, so it would never match.
  */
 function assertSignature(req: FastifyRequest): void {
@@ -106,7 +107,7 @@ async function queueRemoteImages(
 async function adoptImages(modlogId: string, imageIds: string[]): Promise<number> {
   if (!imageIds.length) return 0;
   const parent = await db
-    .select({ robloxId: modlogs.robloxId })
+    .select({ subjectId: modlogs.subjectId })
     .from(modlogs)
     .where(eq(modlogs.id, modlogId))
     .limit(1)
@@ -116,7 +117,7 @@ async function adoptImages(modlogId: string, imageIds: string[]): Promise<number
   const moved = await db
     .update(images)
     .set({ modlogId })
-    .where(and(inArray(images.id, imageIds), eq(images.robloxId, parent.robloxId)))
+    .where(and(inArray(images.id, imageIds), eq(images.subjectId, parent.subjectId)))
     .returning({ id: images.id });
   return moved.length;
 }
@@ -129,7 +130,7 @@ interface PreparedBatch {
   dryRun: boolean;
   records: IngressRecord[];
   /**
-   * Inputs that never became records at all — a forum thread whose title
+   * Inputs that never became records at all - a forum thread whose title
    * holds no Roblox id, for instance. Reported rather than dropped, so the
    * scrape can be fixed at the source.
    */
@@ -234,8 +235,9 @@ async function applyBatch(
         result.counts.created += 1;
         result.created.push({
           id: outcome.id,
-          robloxId: outcome.robloxId,
-          url: config.modlogUrl(outcome.robloxId, outcome.id),
+          platform: outcome.platform,
+          externalId: outcome.externalId,
+          url: config.modlogUrl(outcome.platform, outcome.externalId, outcome.id),
         });
       } else if (outcome.outcome === "updated") {
         result.counts.updated += 1;
@@ -258,7 +260,7 @@ async function applyBatch(
       result.counts.failed += 1;
       result.errors.push({
         index,
-        robloxId: record.robloxId ?? null,
+        subject: subjectOf(record)?.externalId ?? null,
         message: err instanceof Error ? err.message : "unknown error",
       });
       req.log.warn(
@@ -296,7 +298,11 @@ async function applyBatch(
           action: "modlog.create",
           targetType: "modlog",
           targetId: c.id,
-          metadata: { robloxId: c.robloxId, batchId: batch.batchId },
+          metadata: {
+            platform: c.platform,
+            externalId: c.externalId,
+            batchId: batch.batchId,
+          },
           ip: req.ip,
           userAgent: req.headers["user-agent"],
         })),
@@ -377,8 +383,8 @@ export async function ingressRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Raw Discord forum threads, exactly as the scraper emits them.
    *
-   * The mapping — which Roblox account the thread is about, what sanction the
-   * body records, which other accounts it groups — happens here rather than
+   * The mapping - which Roblox account the thread is about, what sanction the
+   * body records, which other accounts it groups - happens here rather than
    * in the scraper. Those rules are the archive's interpretation of its own
    * source, and they change: putting them in the scraper would mean a
    * re-parse required a scraper deploy, and would let the two readings of the

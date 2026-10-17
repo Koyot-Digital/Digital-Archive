@@ -18,11 +18,11 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: `${SITE_NAME} — Roblox moderation records`,
+    default: `${SITE_NAME} - Roblox and Discord moderation records`,
     template: `%s · ${SITE_NAME}`,
   },
   description:
-    "A searchable archive of Roblox moderation records. Every entry carries its source, its evidence and its full edit history.",
+    "A searchable archive of Roblox and Discord moderation records. Every entry carries its source, its evidence and its full edit history.",
   robots: {
     index: true,
     follow: true,
@@ -46,7 +46,7 @@ export const viewport: Viewport = {
 
 /**
  * Applied before first paint so a pinned theme never flashes the other one.
- * Inline by necessity — any external script would run too late.
+ * Inline by necessity - any external script would run too late.
  */
 const themeScript = `
 (function(){try{var t=localStorage.getItem("archive-theme");
@@ -56,7 +56,7 @@ if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)
 const ANON: Viewer = { authenticated: false, authEnabled: true, devBypass: false, user: null };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // A failure here must not take the whole archive down — fall back to anon.
+  // A failure here must not take the whole archive down - fall back to anon.
   const viewer = await api.viewer().catch(() => ANON);
 
   return (

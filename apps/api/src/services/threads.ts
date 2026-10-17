@@ -2,8 +2,10 @@ import { and, asc, eq, inArray, notInArray, sql as raw } from "drizzle-orm";
 import {
   INVERSE_RELATION,
   renderMentions,
+  subjectArchivePath,
   type DiscordThread,
   type RelatedAccount,
+  type SubjectPlatform,
   type SubjectRelation,
   type ThreadRole,
 } from "@archive/shared";
@@ -44,7 +46,7 @@ interface ParticipantTally {
  *
  * Derived from the messages rather than taken on trust, so the number next to
  * a name on the record page is always the number of messages the archive
- * actually holds — not the number the scraper happened to see.
+ * actually holds - not the number the scraper happened to see.
  */
 function tallyParticipants(thread: DiscordThread): Map<string, ParticipantTally> {
   const tallies = new Map<string, ParticipantTally>();
@@ -96,7 +98,7 @@ export interface ThreadSyncResult {
  * what the thread now contains, so a deleted reply must disappear from the
  * archive too. Message rows are matched on `(modlog_id, message_id)`, so an
  * edited reply updates rather than duplicating, and the whole thing runs in
- * one transaction — a record is never left with half a discussion attached.
+ * one transaction - a record is never left with half a discussion attached.
  */
 export async function syncThread(
   modlogId: string,
@@ -218,63 +220,74 @@ export async function syncThread(
 /**
  * Link the other accounts a record named.
  *
- * Each alt gets a `subjects` row of its own — with a `log_count` of zero,
- * since the sanction is filed under the primary account — so that visiting
- * the alt's URL lands on a real page that points at the record, rather than
- * a 404 that hides the connection.
+ * Each named account gets a `subjects` row of its own - with a `log_count` of
+ * zero, since the sanction is filed under the primary account - so that
+ * visiting its URL lands on a real page that points at the record, rather
+ * than a 404 that hides the connection.
+ *
+ * Groupings cross platforms: the Discord forum routinely names a Discord
+ * account and the Roblox account behind it in one title. That is why the
+ * table keys on surrogate subject ids rather than raw account numbers - a
+ * link between a snowflake and a Roblox id has no meaning as a pair of
+ * integers.
  */
 export async function syncRelatedAccounts(
   modlogId: string,
-  robloxId: string,
+  subjectId: string,
   related: RelatedAccount[],
 ): Promise<number> {
-  const primary = BigInt(robloxId);
   const unique = new Map<string, RelatedAccount>();
   for (const account of related) {
-    if (account.robloxId === robloxId) continue; // never relate a row to itself
-    unique.set(account.robloxId, account);
+    unique.set(`${account.platform}:${account.externalId}`, account);
   }
   if (!unique.size) return 0;
 
-  for (const account of unique.values()) {
-    await upsertSubject({ robloxId: account.robloxId, username: account.username });
-  }
-
   const rows: {
-    robloxId: bigint;
-    relatedRobloxId: bigint;
+    subjectId: string;
+    relatedSubjectId: string;
     relation: SubjectRelation;
     assertedBy: string;
   }[] = [];
+
   for (const account of unique.values()) {
-    const other = BigInt(account.robloxId);
+    const other = await upsertSubject({
+      platform: account.platform,
+      externalId: account.externalId,
+      username: account.username,
+    });
+    // A title that names the same account twice, or names the subject again
+    // alongside itself, must not produce a self-referential row.
+    if (other.id === subjectId) continue;
+
     rows.push({
-      robloxId: primary,
-      relatedRobloxId: other,
+      subjectId,
+      relatedSubjectId: other.id,
       relation: account.relation,
       assertedBy: modlogId,
     });
     // The mirror row, worded from the other account's side.
     rows.push({
-      robloxId: other,
-      relatedRobloxId: primary,
+      subjectId: other.id,
+      relatedSubjectId: subjectId,
       relation: INVERSE_RELATION[account.relation],
       assertedBy: modlogId,
     });
   }
 
+  if (!rows.length) return 0;
+
   await db
     .insert(subjectRelations)
     .values(rows)
     .onConflictDoUpdate({
-      target: [subjectRelations.robloxId, subjectRelations.relatedRobloxId],
+      target: [subjectRelations.subjectId, subjectRelations.relatedSubjectId],
       set: {
         relation: raw`excluded.relation`,
         assertedBy: raw`excluded.asserted_by`,
       },
     });
 
-  return unique.size;
+  return rows.length / 2;
 }
 
 /* ───────────────────────────── reads ───────────────────────────── */
@@ -396,7 +409,9 @@ export async function getThread(
 }
 
 export interface PublicRelatedAccount {
-  robloxId: string;
+  subjectId: string;
+  platform: SubjectPlatform;
+  externalId: string;
   username: string | null;
   relation: SubjectRelation;
   logCount: number;
@@ -406,7 +421,7 @@ export interface PublicRelatedAccount {
 }
 
 /** Accounts grouped with this one, in either direction. */
-export async function getRelatedAccounts(robloxId: string): Promise<PublicRelatedAccount[]> {
+export async function getRelatedAccounts(subjectId: string): Promise<PublicRelatedAccount[]> {
   const rows = await db
     .select({
       relation: subjectRelations.relation,
@@ -414,16 +429,18 @@ export async function getRelatedAccounts(robloxId: string): Promise<PublicRelate
       subject: subjects,
     })
     .from(subjectRelations)
-    .innerJoin(subjects, eq(subjects.robloxId, subjectRelations.relatedRobloxId))
-    .where(eq(subjectRelations.robloxId, BigInt(robloxId)))
+    .innerJoin(subjects, eq(subjects.id, subjectRelations.relatedSubjectId))
+    .where(eq(subjectRelations.subjectId, subjectId))
     .orderBy(asc(subjectRelations.relation), raw`${subjects.logCount} desc`);
 
   return rows.map((row) => ({
-    robloxId: row.subject.robloxId.toString(),
+    subjectId: row.subject.id,
+    platform: row.subject.platform,
+    externalId: row.subject.externalId.toString(),
     username: row.subject.username,
     relation: row.relation,
     logCount: row.subject.logCount,
-    archiveUrl: `/roblox-modlogs/${row.subject.robloxId.toString()}`,
+    archiveUrl: subjectArchivePath(row.subject.platform, row.subject.externalId.toString()),
     assertedBy: row.assertedBy,
   }));
 }

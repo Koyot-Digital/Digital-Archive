@@ -20,7 +20,8 @@ A record:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `robloxId` | ✅ | Number or string. The subject is created on first sight. |
+| `robloxId` | ✅* | Number or string. The subject is created on first sight. |
+| `subject` | ✅* | `{ platform, externalId, username?, … }` - use this for a Discord subject, or any platform other than Roblox. |
 | `title` | ✅ | ≤ 300 chars. |
 | `source` | ✅ | Your scraper's name. Half of the dedupe key. |
 | `body` | | Markdown, ≤ 100KB. Links in here become embed cards. |
@@ -28,32 +29,46 @@ A record:
 | `action` | | `ban` `temp_ban` `kick` `warning` `mute` `content_deletion` `account_deletion` `termination` `note` `other`. Default `other`. |
 | `severity` | | `info` `low` `medium` `high` `critical`. Default `info`. |
 | `reason` | | Short, ≤ 2000 chars. Shown above the body. |
-| `occurredAt` | | ISO-8601, epoch seconds, or epoch millis — all accepted. |
+| `occurredAt` | | ISO-8601, epoch seconds, or epoch millis - all accepted. |
 | `sourceUrl` | | Where you found it. |
 | `username`, `displayName`, `avatarUrl` | | Used to fill in the subject. A blank field never overwrites a known one. |
 | `tags` | | ≤ 24, lowercased server-side. |
 | `evidence` | | Arbitrary JSON object, ≤ 64KB serialised. |
 | `imageUrls` | | ≤ 24. Fetched, converted to WebP and attached after the response. |
 | `imageIds` | | ≤ 24 already-uploaded image ids to attach. |
-| `relatedAccounts` | | ≤ 24 other accounts this record names: `{ robloxId, username?, relation }` where relation is `alt` `successor` `predecessor` `related`. |
+| `relatedAccounts` | | ≤ 24 other accounts this record names: `{ platform, externalId, username?, relation }` where relation is `alt` `successor` `predecessor` `related`. May name a different platform from the subject. |
 | `ticketRef` | | Support ticket reference, ≤ 32 chars. Searchable. |
 | `thread` | | The source discussion. See below. |
+
+\* **Exactly one of `robloxId` or `subject`.** `robloxId: 156` is shorthand
+for `subject: { platform: "roblox", externalId: "156" }` and is kept because
+it is the field every existing scraper already sends - a schema tidy-up is
+not worth breaking a nightly cron over. Anything that is not a Roblox account
+uses the longer form:
+
+```jsonc
+"subject": { "platform": "discord", "externalId": "499982091824398351",
+             "username": "valensrutto" }
+```
+
+A subject is identified by `(platform, externalId)`. The same digits on two
+platforms are two different subjects, and the archive will not merge them.
 
 ### Grouping accounts instead of duplicating records
 
 One sanction announced against an account *and its three alts* is one event.
 Send it as one record with three `relatedAccounts`, not as four records.
 
-The archive creates a `subjects` row for each named account — with no records
-of its own — and links it in both directions, so visiting any of the four
+The archive creates a `subjects` row for each named account - with no records
+of its own - and links it in both directions, so visiting any of the four
 accounts lands on a page that points at the record. Sending four copies
 instead would quadruple every count the archive reports and make a single ban
 look like a pattern of them.
 
 ### Sending a discussion
 
-If your source has a conversation attached — a forum thread, a ticket, a
-review queue — send it as `thread`, because on most moderation sources that
+If your source has a conversation attached - a forum thread, a ticket, a
+review queue - send it as `thread`, because on most moderation sources that
 is where the appeal, the correction and the second opinion live:
 
 ```jsonc
@@ -77,26 +92,26 @@ record always renders, then refreshes them from the Discord API when a bot
 token is configured, and labels them *as scraped* until it has. A blank field
 in a hint never blanks a value already known.
 
-Re-sending a thread replaces its stored messages — a reply deleted upstream
+Re-sending a thread replaces its stored messages - a reply deleted upstream
 disappears here too, because the thread is a copy and not a record of its own.
 Participant reply counts are recomputed from the messages that actually
 arrived, so they always match what the archive holds.
 
 > **Scraping a Discord forum?** Do not build any of the above. Send the
 > threads verbatim to `POST /ingress/discord-forum` and the archive maps them
-> itself — title to subject, `;tban … 3d …` to action and severity, alts to
+> itself - title to subject, `;tban … 3d …` to action and severity, alts to
 > groupings, replies to the thread. See [`API.md`](API.md#post-ingressdiscord-forum).
 
 ### Conflict policy
 
 Dedupe is on `source` + `sourceId`.
 
-- **`merge`** (default) — update the record, *unless* a human has edited it.
+- **`merge`** (default) - update the record, *unless* a human has edited it.
   Use this for a recurring scrape: it keeps your data fresh without ever
   reverting a moderator's correction.
-- **`replace`** — always overwrite. The old state still lands in the revision
+- **`replace`** - always overwrite. The old state still lands in the revision
   history, labelled as an ingress replace.
-- **`skip`** — never touch an existing record. Use for a backfill where you
+- **`skip`** - never touch an existing record. Use for a backfill where you
   only want the rows you do not already have.
 
 ### Response
@@ -117,11 +132,11 @@ Status codes: `200` normally, `207` if every record failed, `401`/`403` for
 credential problems, `422` with per-field `details` for a schema failure,
 `429` with `retryAfterMs` when rate limited.
 
-`unmapped` is always `[]` here — it only fills in on
+`unmapped` is always `[]` here - it only fills in on
 `/ingress/discord-forum`, where the archive does the mapping and can
 legitimately fail to find a subject in a thread title.
 
-`"replayed": true` means this `batchId` was already processed — the response is
+`"replayed": true` means this `batchId` was already processed - the response is
 the original result, nothing was written. That is the behaviour you want from a
 cron that timed out and retried.
 
@@ -269,7 +284,7 @@ curl -X POST https://api.domain.com/digitalarchive/v1/images \
   -F "file=@evidence.png"
 ```
 
-Send the `modlogId` field **before** the file parts — the server reads the
+Send the `modlogId` field **before** the file parts - the server reads the
 stream in order and needs to know where the image belongs before it starts
 converting it.
 
@@ -286,7 +301,7 @@ and retries are harmless:
 ```
 
 Point your monitoring at `GET /digitalarchive/v1/ingress/whoami` rather than at
-`/ingress` — it confirms the credential, its scopes and its rate budget without
+`/ingress` - it confirms the credential, its scopes and its rate budget without
 writing anything.
 
 Ingest runs are visible afterwards in the moderation log, as

@@ -14,9 +14,9 @@ import { SESSION_COOKIE, ensureDevUser, resolveSession, type SessionUser } from 
  * Request identity.
  *
  * Three shapes, resolved once per request in an onRequest hook:
- *   anon    — public reads only
- *   user    — a Discord session; carries a role
- *   api_key — a scraper credential; carries scopes, never a role
+ *   anon    - public reads only
+ *   user    - a Discord session; carries a role
+ *   api_key - a scraper credential; carries scopes, never a role
  *
  * Keeping scrapers out of the role system is deliberate: an ingest token can
  * write records but can never, for example, change someone's role or read the
@@ -145,7 +145,7 @@ export const authPlugin = fp(
     });
 
     /**
-     * Either a sufficiently privileged human *or* a key with the scope —
+     * Either a sufficiently privileged human *or* a key with the scope -
      * used by endpoints both the web UI and the scraper legitimately call.
      */
     app.decorate(

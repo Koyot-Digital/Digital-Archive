@@ -42,7 +42,7 @@ export async function ensureStore(): Promise<void> {
  * Create the store at most once per process.
  *
  * The images service calls `ensureStore()` at boot, but it is not the only
- * writer — an import script or a one-off backfill writes through the same
+ * writer - an import script or a one-off backfill writes through the same
  * path, and those have no boot sequence. Memoised rather than called on every
  * write: an import converting a thousand attachments should not issue a
  * thousand redundant mkdirs.

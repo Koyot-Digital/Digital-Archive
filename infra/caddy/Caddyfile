@@ -1,5 +1,5 @@
 # ═════════════════════════════════════════════════════════════════════════════
-#  Caddy — internal reverse proxy
+#  Caddy - internal reverse proxy
 #
 #  TLS terminates at Cloudflare, so Caddy serves plain HTTP on the compose
 #  network and never needs a certificate. Each listener corresponds to one

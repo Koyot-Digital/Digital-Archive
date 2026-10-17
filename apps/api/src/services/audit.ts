@@ -44,7 +44,7 @@ export async function recordAudit(entry: AuditEntry): Promise<void> {
   }
 }
 
-/** Batch variant — one statement for a whole ingest run. */
+/** Batch variant - one statement for a whole ingest run. */
 export async function recordAuditMany(entries: AuditEntry[]): Promise<void> {
   if (!entries.length) return;
   try {

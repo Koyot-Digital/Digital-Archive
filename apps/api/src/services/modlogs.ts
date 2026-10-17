@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, lte, sql as raw, type SQL } from "drizzle-orm";
 import {
   newId,
+  subjectArchivePath,
+  subjectOf,
   type IngressRecord,
   type ModlogAction,
   type ModlogSeverity,
   type RecordStatus,
   type RelatedAccount,
+  type SubjectPlatform,
+  type SubjectRef,
 } from "@archive/shared";
 import { db } from "../db/client.js";
 import { images, links, modlogRevisions, modlogs, subjects } from "../db/schema.js";
@@ -15,6 +19,7 @@ import { conflict, notFound } from "../lib/errors.js";
 import { renderBody, toExcerpt } from "./render.js";
 import { syncLinks } from "./links.js";
 import { upsertSubject } from "./subjects.js";
+import { seedDiscordUsers } from "./discord-users.js";
 import { toPublicSubject, type PublicSubject } from "./subjects.js";
 import {
   getRelatedAccounts,
@@ -74,7 +79,11 @@ export interface PublicLink {
 
 export interface PublicModlog {
   id: string;
-  robloxId: string;
+  /** Surrogate subject key, for joins and flat lookups. */
+  subjectId: string;
+  platform: SubjectPlatform;
+  /** The subject's id on its own platform. */
+  externalId: string;
   title: string;
   excerpt: string;
   action: ModlogAction;
@@ -109,13 +118,15 @@ export interface PublicModlog {
 
 type ModlogRow = typeof modlogs.$inferSelect;
 
-function toPublicImage(row: typeof images.$inferSelect): PublicImage {
-  const robloxId = row.robloxId.toString();
+function toPublicImage(
+  row: typeof images.$inferSelect,
+  subject: { platform: SubjectPlatform; externalId: string },
+): PublicImage {
   return {
     id: row.id,
     url: config.imageUrl(row.id, "full"),
     thumbUrl: config.imageUrl(row.id, "thumb"),
-    pageUrl: `/roblox-modlogs/${robloxId}/${row.modlogId}/${row.id}`,
+    pageUrl: `${subjectArchivePath(subject.platform, subject.externalId)}/${row.modlogId}/${row.id}`,
     width: row.width,
     height: row.height,
     bytes: row.bytes,
@@ -140,11 +151,23 @@ function toPublicLink(row: typeof links.$inferSelect): PublicLink {
   };
 }
 
-function toSummary(row: ModlogRow): PublicModlog {
-  const robloxId = row.robloxId.toString();
+/**
+ * A record summary.
+ *
+ * Needs the subject's platform identity to build its own URL, which the row
+ * alone does not carry - `modlogs` holds only the surrogate key. Callers join
+ * it in; `listModlogsForSubject` already has it, and the feed queries fetch
+ * it alongside.
+ */
+function toSummary(
+  row: ModlogRow,
+  subject: { platform: SubjectPlatform; externalId: string },
+): PublicModlog {
   return {
     id: row.id,
-    robloxId,
+    subjectId: row.subjectId,
+    platform: subject.platform,
+    externalId: subject.externalId,
     title: row.title,
     // A removed log keeps its shell so links do not 404, but says nothing.
     excerpt: row.status === "removed" ? "" : toExcerpt(row.bodyMd, 220),
@@ -162,7 +185,7 @@ function toSummary(row: ModlogRow): PublicModlog {
     threadReplyCount: row.threadReplyCount,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    url: `/roblox-modlogs/${robloxId}/${row.id}`,
+    url: `${subjectArchivePath(subject.platform, subject.externalId)}/${row.id}`,
   };
 }
 
@@ -222,7 +245,12 @@ function buildOrder(sort: ListOptions["sort"]) {
   return [desc(effective), desc(modlogs.id)];
 }
 
-/** Attach the first published image of each log, in one extra query. */
+/**
+ * Attach the first published image of each log, in one extra query.
+ *
+ * The summaries already carry their subject's platform identity, so the
+ * image page URLs are built from those rather than joining subjects again.
+ */
 async function withThumbnails(rows: PublicModlog[]): Promise<PublicModlog[]> {
   const ids = rows.filter((r) => r.imageCount > 0).map((r) => r.id);
   if (!ids.length) return rows.map((r) => ({ ...r, thumbnail: null }));
@@ -233,25 +261,48 @@ async function withThumbnails(rows: PublicModlog[]): Promise<PublicModlog[]> {
     .where(and(inArray(images.modlogId, ids), eq(images.status, "published")))
     .orderBy(asc(images.modlogId), asc(images.position), asc(images.createdAt));
 
+  const byModlog = new Map(rows.map((r) => [r.id, r]));
   const first = new Map<string, PublicImage>();
   for (const row of thumbs) {
-    if (!first.has(row.modlogId)) first.set(row.modlogId, toPublicImage(row));
+    if (first.has(row.modlogId)) continue;
+    const parent = byModlog.get(row.modlogId);
+    if (!parent) continue;
+    first.set(
+      row.modlogId,
+      toPublicImage(row, { platform: parent.platform, externalId: parent.externalId }),
+    );
   }
   return rows.map((r) => ({ ...r, thumbnail: first.get(r.id) ?? null }));
 }
 
+/**
+ * The subject columns every record read needs in order to address itself.
+ *
+ * Selected alongside the record rather than fetched per row: a 25-record page
+ * would otherwise be 26 queries, and the join is on the primary key.
+ */
+const subjectCols = {
+  platform: subjects.platform,
+  externalId: subjects.externalId,
+} as const;
+
+function subjectOfRow(row: { platform: SubjectPlatform; externalId: bigint }) {
+  return { platform: row.platform, externalId: row.externalId.toString() };
+}
+
 export async function listModlogsForSubject(
-  robloxId: string,
+  subjectId: string,
   opts: ListOptions,
   visibility: Visibility,
 ): Promise<ModlogPage> {
-  const filters = [eq(modlogs.robloxId, BigInt(robloxId)), ...buildFilters(opts, visibility)];
+  const filters = [eq(modlogs.subjectId, subjectId), ...buildFilters(opts, visibility)];
   const where = and(...filters);
 
   const [rows, total] = await Promise.all([
     db
-      .select()
+      .select({ modlog: modlogs, ...subjectCols })
       .from(modlogs)
+      .innerJoin(subjects, eq(subjects.id, modlogs.subjectId))
       .where(where)
       .orderBy(...buildOrder(opts.sort))
       .limit(opts.limit)
@@ -263,7 +314,9 @@ export async function listModlogsForSubject(
       .then((r) => r[0]?.total ?? 0),
   ]);
 
-  const summaries = await withThumbnails(rows.map(toSummary));
+  const summaries = await withThumbnails(
+    rows.map((r) => toSummary(r.modlog, subjectOfRow(r))),
+  );
   return {
     modlogs: summaries,
     total,
@@ -280,8 +333,9 @@ export async function listRecentModlogs(
   const where = and(...buildFilters(opts, visibility));
   const [rows, total] = await Promise.all([
     db
-      .select()
+      .select({ modlog: modlogs, ...subjectCols })
       .from(modlogs)
+      .innerJoin(subjects, eq(subjects.id, modlogs.subjectId))
       .where(where)
       .orderBy(...buildOrder(opts.sort))
       .limit(opts.limit)
@@ -293,7 +347,9 @@ export async function listRecentModlogs(
       .then((r) => r[0]?.total ?? 0),
   ]);
 
-  const summaries = await withThumbnails(rows.map(toSummary));
+  const summaries = await withThumbnails(
+    rows.map((r) => toSummary(r.modlog, subjectOfRow(r))),
+  );
   return {
     modlogs: summaries,
     total,
@@ -324,8 +380,9 @@ export async function searchModlogs(
 
   const [rows, total] = await Promise.all([
     db
-      .select()
+      .select({ modlog: modlogs, ...subjectCols })
       .from(modlogs)
+      .innerJoin(subjects, eq(subjects.id, modlogs.subjectId))
       .where(where)
       .orderBy(desc(rank), desc(modlogs.createdAt))
       .limit(opts.limit)
@@ -337,7 +394,9 @@ export async function searchModlogs(
       .then((r) => r[0]?.total ?? 0),
   ]);
 
-  const summaries = await withThumbnails(rows.map(toSummary));
+  const summaries = await withThumbnails(
+    rows.map((r) => toSummary(r.modlog, subjectOfRow(r))),
+  );
   return {
     modlogs: summaries,
     total,
@@ -351,24 +410,27 @@ export async function searchModlogs(
 /**
  * One modlog with everything the detail page renders.
  *
- * `robloxId` is checked when supplied so /roblox-modlogs/:robloxId/:id cannot
- * be used to render a log under the wrong subject.
+ * `expectedSubjectId` is checked when supplied so
+ * /<platform>-modlogs/:account/:id cannot be used to render a log under the
+ * wrong subject - or under the right account on the wrong platform.
  */
 export async function getModlog(
   id: string,
   visibility: Visibility,
-  expectedRobloxId?: string,
+  expectedSubjectId?: string,
 ): Promise<PublicModlog> {
-  const row = await db
-    .select()
+  const joined = await db
+    .select({ modlog: modlogs, subject: subjects })
     .from(modlogs)
+    .innerJoin(subjects, eq(subjects.id, modlogs.subjectId))
     .where(and(eq(modlogs.id, id), statusFilter(visibility)))
     .limit(1)
     .then((r) => r[0]);
-  if (!row) throw notFound("Modlog");
-  if (expectedRobloxId && row.robloxId.toString() !== expectedRobloxId) throw notFound("Modlog");
+  if (!joined) throw notFound("Modlog");
+  const { modlog: row, subject: subjectRow } = joined;
+  if (expectedSubjectId && row.subjectId !== expectedSubjectId) throw notFound("Modlog");
 
-  const [imageRows, linkRows, subjectRow, thread, relatedAccounts] = await Promise.all([
+  const [imageRows, linkRows, thread, relatedAccounts] = await Promise.all([
     db
       .select()
       .from(images)
@@ -380,18 +442,16 @@ export async function getModlog(
       )
       .orderBy(asc(images.position), asc(images.createdAt)),
     db.select().from(links).where(eq(links.modlogId, id)).orderBy(asc(links.position)),
-    db
-      .select()
-      .from(subjects)
-      .where(eq(subjects.robloxId, row.robloxId))
-      .limit(1)
-      .then((r) => r[0]),
     getThread(id, { includeHidden: visibility === "moderator" }),
-    getRelatedAccounts(row.robloxId.toString()),
+    getRelatedAccounts(row.subjectId),
   ]);
 
   const withheld = row.status === "removed" && visibility === "public";
-  const summary = toSummary(row);
+  const subjectIdentity = {
+    platform: subjectRow.platform,
+    externalId: subjectRow.externalId.toString(),
+  };
+  const summary = toSummary(row, subjectIdentity);
 
   return {
     ...summary,
@@ -399,10 +459,10 @@ export async function getModlog(
       ? { markdown: "", html: "" }
       : { markdown: row.bodyMd, html: row.bodyHtml },
     evidence: withheld ? {} : row.evidence,
-    images: withheld ? [] : imageRows.map(toPublicImage),
+    images: withheld ? [] : imageRows.map((img) => toPublicImage(img, subjectIdentity)),
     linkEmbeds: withheld ? [] : linkRows.map(toPublicLink),
-    subject: subjectRow ? toPublicSubject(subjectRow) : undefined,
-    // A withheld record withholds its discussion too — the replies are the
+    subject: toPublicSubject(subjectRow),
+    // A withheld record withholds its discussion too - the replies are the
     // part most likely to contain what got the record taken down.
     thread: withheld ? null : thread,
     relatedAccounts,
@@ -410,12 +470,12 @@ export async function getModlog(
 }
 
 export async function getImageForRoute(
-  robloxId: string,
+  subjectId: string,
   modlogId: string,
   imageId: string,
   visibility: Visibility,
 ): Promise<{ image: PublicImage; modlog: PublicModlog; siblings: PublicImage[] }> {
-  const modlog = await getModlog(modlogId, visibility, robloxId);
+  const modlog = await getModlog(modlogId, visibility, subjectId);
   const siblings = modlog.images ?? [];
   const image = siblings.find((i) => i.id === imageId);
   if (!image) throw notFound("Image");
@@ -445,12 +505,23 @@ export interface Actor {
 }
 
 /** Deterministic dedupe key for records a scraper did not identify itself. */
-function derivedSourceId(record: { robloxId: string; title: string; body: string; occurredAt?: Date | undefined }): string {
+function derivedSourceId(record: {
+  subject: SubjectRef;
+  title: string;
+  body: string;
+  occurredAt?: Date | undefined;
+}): string {
   const digest = createHash("sha256")
     .update(
-      [record.robloxId, record.title.trim().toLowerCase(), record.occurredAt?.toISOString() ?? "", record.body.trim()].join(
-        "\u0000",
-      ),
+      [
+        // Platform is part of the key: the same digits on two platforms are
+        // two different subjects and must not collapse into one record.
+        record.subject.platform,
+        record.subject.externalId,
+        record.title.trim().toLowerCase(),
+        record.occurredAt?.toISOString() ?? "",
+        record.body.trim(),
+      ].join("\u0000"),
     )
     .digest("hex");
   return `auto:${digest.slice(0, 40)}`;
@@ -475,7 +546,9 @@ function snapshotOf(row: ModlogRow): Record<string, unknown> {
 
 export interface UpsertOutcome {
   id: string;
-  robloxId: string;
+  subjectId: string;
+  platform: SubjectPlatform;
+  externalId: string;
   outcome: "created" | "updated" | "skipped";
   /**
    * Discord accounts this record touched, handed back so the caller can
@@ -492,26 +565,35 @@ export interface UpsertOutcome {
  * Runs in its own transaction so a malformed record in a 500-record batch
  * fails alone. The conflict policy is the interesting part:
  *
- *   skip    — never touch an existing row
- *   merge   — update, unless a human has edited the row (updated_by is set).
+ *   skip    - never touch an existing row
+ *   merge   - update, unless a human has edited the row (updated_by is set).
  *             This is the default and it is what keeps a nightly re-scrape
  *             from silently reverting a moderator's correction.
- *   replace — always overwrite, and say so in the revision history
+ *   replace - always overwrite, and say so in the revision history
  */
 export async function upsertFromIngress(
   record: IngressRecord,
   onConflict: "skip" | "merge" | "replace",
   actor: Actor,
 ): Promise<UpsertOutcome> {
-  const sourceId = record.sourceId ?? derivedSourceId(record);
+  const subject = subjectOf(record);
+  if (!subject) {
+    throw new Error(
+      "record names no subject - supply either robloxId or subject.{platform,externalId}",
+    );
+  }
+
+  const sourceId = record.sourceId ?? derivedSourceId({ ...record, subject });
   const rendered = renderBody(record.body);
 
-  await upsertSubject({
-    robloxId: record.robloxId,
-    username: record.username,
-    displayName: record.displayName,
-    avatarUrl: record.avatarUrl,
-  });
+  // Creates the subject on first sight and returns its surrogate id, which
+  // is what the record actually references.
+  const subjectRow = await upsertSubject(subject);
+  const identity = {
+    subjectId: subjectRow.id,
+    platform: subjectRow.platform,
+    externalId: subjectRow.externalId.toString(),
+  };
 
   const outcome = await db.transaction(async (tx) => {
     const existing = await tx
@@ -524,10 +606,10 @@ export async function upsertFromIngress(
 
     if (existing) {
       if (onConflict === "skip") {
-        return { id: existing.id, robloxId: existing.robloxId.toString(), outcome: "skipped" as const };
+        return { id: existing.id, outcome: "skipped" as const };
       }
       if (onConflict === "merge" && existing.updatedBy) {
-        return { id: existing.id, robloxId: existing.robloxId.toString(), outcome: "skipped" as const };
+        return { id: existing.id, outcome: "skipped" as const };
       }
       // Hand-edited records are caught above, so reaching here means the
       // stored row is scraper-owned and the new scrape supersedes it.
@@ -543,7 +625,9 @@ export async function upsertFromIngress(
       await tx
         .update(modlogs)
         .set({
-          robloxId: BigInt(record.robloxId),
+          // A re-scrape can move a record to a different subject, e.g. when a
+          // title is corrected; the recount trigger fires for both sides.
+          subjectId: identity.subjectId,
           title: record.title,
           bodyMd: record.body,
           bodyHtml: rendered.html,
@@ -560,13 +644,13 @@ export async function upsertFromIngress(
         })
         .where(eq(modlogs.id, existing.id));
 
-      return { id: existing.id, robloxId: record.robloxId, outcome: "updated" as const };
+      return { id: existing.id, outcome: "updated" as const };
     }
 
     const id = newId();
     await tx.insert(modlogs).values({
       id,
-      robloxId: BigInt(record.robloxId),
+      subjectId: identity.subjectId,
       title: record.title,
       bodyMd: record.body,
       bodyHtml: rendered.html,
@@ -583,11 +667,11 @@ export async function upsertFromIngress(
       createdBy: actor.userId ?? null,
       ingestedBy: actor.apiKeyId ?? null,
     });
-    return { id, robloxId: record.robloxId, outcome: "created" as const };
+    return { id, outcome: "created" as const };
   });
 
   if (outcome.outcome === "skipped") {
-    return { ...outcome, discordIds: [], relatedAccounts: 0, threadMessages: 0 };
+    return { ...outcome, ...identity, discordIds: [], relatedAccounts: 0, threadMessages: 0 };
   }
 
   await syncLinks(outcome.id, rendered.links);
@@ -595,21 +679,45 @@ export async function upsertFromIngress(
   /**
    * Thread and alt grouping are written outside the record's transaction.
    *
-   * They are derived data: if either fails, the moderation record itself —
-   * the thing worth keeping — is already safely stored, and the next
+   * They are derived data: if either fails, the moderation record itself -
+   * the thing worth keeping - is already safely stored, and the next
    * re-ingest of the same source will rebuild them. Rolling the record back
    * because a reply failed to render would be the wrong trade.
    */
   const relatedAccounts = await syncRelatedAccounts(
     outcome.id,
-    outcome.robloxId,
+    identity.subjectId,
     record.relatedAccounts,
   );
   const thread = record.thread ? await syncThread(outcome.id, record.thread) : null;
 
+  /*
+   * A Discord subject is itself a Discord account, so it joins the set of
+   * ids handed back for refreshing - the same `GET /users/{id}` that gives a
+   * moderator their avatar gives the subject theirs, and the resolver writes
+   * it back onto the subject row. Seeded here with whatever the thread title
+   * claimed so the page renders a name before any lookup happens.
+   */
+  const discordIds = new Set(thread?.discordIds ?? []);
+  const discordSubjects = [subject, ...record.relatedAccounts].filter(
+    (account) => account.platform === "discord",
+  );
+  if (discordSubjects.length) {
+    await seedDiscordUsers(
+      discordSubjects.map((account) => ({
+        id: account.externalId,
+        ...(account.username ? { username: account.username } : {}),
+        bot: false,
+        role: "commenter" as const,
+      })),
+    );
+    for (const account of discordSubjects) discordIds.add(account.externalId);
+  }
+
   return {
     ...outcome,
-    discordIds: thread?.discordIds ?? [],
+    ...identity,
+    discordIds: [...discordIds],
     relatedAccounts,
     threadMessages: thread?.messages ?? 0,
   };
@@ -618,10 +726,7 @@ export async function upsertFromIngress(
 /** Create a modlog by hand, from the web UI. */
 export async function createModlog(
   input: {
-    robloxId: string;
-    username?: string | undefined;
-    displayName?: string | undefined;
-    avatarUrl?: string | undefined;
+    subject: SubjectRef;
     title: string;
     body: string;
     action: ModlogAction;
@@ -641,18 +746,13 @@ export async function createModlog(
   const rendered = renderBody(input.body);
   const sourceId = input.sourceId ?? derivedSourceId(input);
 
-  await upsertSubject({
-    robloxId: input.robloxId,
-    username: input.username,
-    displayName: input.displayName,
-    avatarUrl: input.avatarUrl,
-  });
+  const subjectRow = await upsertSubject(input.subject);
 
   const id = newId();
   try {
     await db.insert(modlogs).values({
       id,
-      robloxId: BigInt(input.robloxId),
+      subjectId: subjectRow.id,
       title: input.title,
       bodyMd: input.body,
       bodyHtml: rendered.html,
@@ -677,7 +777,7 @@ export async function createModlog(
 
   await syncLinks(id, rendered.links);
   if (input.relatedAccounts?.length) {
-    await syncRelatedAccounts(id, input.robloxId, input.relatedAccounts);
+    await syncRelatedAccounts(id, subjectRow.id, input.relatedAccounts);
   }
   return getModlog(id, "moderator");
 }
@@ -767,11 +867,13 @@ export interface ArchiveStats {
   images: number;
   sources: { source: string; count: number }[];
   actions: { action: string; count: number }[];
+  /** Records per subject platform, so the home page can say what it holds. */
+  platforms: { platform: SubjectPlatform; subjects: number; modlogs: number }[];
   latestAt: string | null;
 }
 
 export async function archiveStats(): Promise<ArchiveStats> {
-  const [counts, sources, actions] = await Promise.all([
+  const [counts, sources, actions, platforms] = await Promise.all([
     // One round trip for the headline numbers. A scalar-subquery SELECT has
     // no FROM clause, which the query builder cannot express, so this is raw.
     db
@@ -796,12 +898,29 @@ export async function archiveStats(): Promise<ArchiveStats> {
       .where(eq(modlogs.status, "published"))
       .groupBy(modlogs.action)
       .orderBy(desc(raw`count(*)`)),
+    // Subjects and records per platform in one pass. Counted from the
+    // records rather than from subjects.log_count so the two numbers on the
+    // page can never disagree with each other.
+    db
+      .select({
+        platform: subjects.platform,
+        subjects: raw<number>`count(distinct ${subjects.id})::int`,
+        modlogs: raw<number>`count(${modlogs.id})::int`,
+      })
+      .from(subjects)
+      .innerJoin(
+        modlogs,
+        and(eq(modlogs.subjectId, subjects.id), eq(modlogs.status, "published")),
+      )
+      .groupBy(subjects.platform)
+      .orderBy(desc(raw`count(${modlogs.id})`)),
   ]);
 
   return {
     subjects: counts?.subjects ?? 0,
     modlogs: counts?.modlogs ?? 0,
     images: counts?.images ?? 0,
+    platforms,
     sources,
     actions,
     latestAt: counts?.latest_at ? new Date(counts.latest_at).toISOString() : null,

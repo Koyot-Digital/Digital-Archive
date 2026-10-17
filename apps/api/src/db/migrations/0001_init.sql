@@ -1,5 +1,5 @@
 -- ════════════════════════════════════════════════════════════════════════════
---  Digital Archive — initial schema
+--  Digital Archive - initial schema
 --
 --  Design notes:
 --   * Public ids are fixed-width char(16) so the URL space is predictable and

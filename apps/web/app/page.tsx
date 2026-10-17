@@ -1,6 +1,6 @@
 import Link from "next/link";
+import { ACTION_LABELS, PLATFORM_LABELS, type ModlogAction } from "@archive/shared";
 import { api } from "@/lib/api";
-import { ACTION_LABELS, type ModlogAction } from "@archive/shared";
 import { formatBytes, formatNumber, formatPercent, formatRelative } from "@/lib/format";
 import { ModlogList } from "@/components/modlog-card";
 import { SearchBox } from "@/components/search-box";
@@ -12,7 +12,7 @@ export const revalidate = 60;
  * Landing page.
  *
  * Built around the search box, because almost every visit starts with "what
- * does the archive have on this account?" — the recent feed is there so the
+ * does the archive have on this account?" - the recent feed is there so the
  * page is never empty and so the ingest cadence is visible at a glance.
  */
 export default async function HomePage() {
@@ -25,7 +25,7 @@ export default async function HomePage() {
     <div className="animate-fade-up">
       <section className="mx-auto max-w-prose py-10 text-center sm:py-16">
         <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
-          Roblox moderation records, kept honestly.
+          Moderation records, kept honestly.
         </h1>
         <p className="mx-auto mt-3 max-w-[38rem] text-pretty text-[0.9375rem] leading-7 text-muted">
           Every record in this archive names its source, keeps its evidence as compressed WebP, and
@@ -35,7 +35,7 @@ export default async function HomePage() {
         <div className="mx-auto mt-7 max-w-xl">
           <SearchBox />
           <p className="mt-2 text-xs text-faint">
-            Search by username, display name, Roblox ID or any text in a record.
+            Search by username, display name, Roblox or Discord ID, or any text in a record.
           </p>
         </div>
       </section>
@@ -62,6 +62,28 @@ export default async function HomePage() {
           <div className="bg-surface px-4 py-4">
             <Stat label="Last ingest" value={formatRelative(stats.archive.latestAt)} />
           </div>
+        </section>
+      ) : null}
+
+      {/* What the archive actually covers. Two platforms is a fact a reader
+          needs before they trust a subject page that says "no records". */}
+      {stats?.archive.platforms.length ? (
+        <section className="mb-10 flex flex-wrap gap-2">
+          {stats.archive.platforms.map(({ platform, subjects, modlogs }) => (
+            <Link
+              key={platform}
+              href={`/subjects?platform=${platform}`}
+              className="card flex items-baseline gap-2 px-3.5 py-2 text-sm transition-colors hover:border-line-strong"
+            >
+              <span className="font-medium">{PLATFORM_LABELS[platform]}</span>
+              <span className="tabular-nums text-muted">
+                {formatNumber(modlogs)} record{modlogs === 1 ? "" : "s"}
+              </span>
+              <span className="text-2xs tabular-nums text-faint">
+                {formatNumber(subjects)} account{subjects === 1 ? "" : "s"}
+              </span>
+            </Link>
+          ))}
         </section>
       ) : null}
 

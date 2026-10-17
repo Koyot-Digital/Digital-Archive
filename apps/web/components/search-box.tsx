@@ -73,7 +73,7 @@ export function SearchBox({
           name="q"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder={compact ? "Search" : "Search records, usernames or Roblox IDs"}
+          placeholder={compact ? "Search" : "Search records, usernames or account IDs"}
           autoComplete="off"
           spellCheck={false}
           className={cx(

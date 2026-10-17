@@ -21,7 +21,7 @@ redis.on("error", (err) => {
   // a dead Redis cannot flood the disk.
   if (!warned) {
     warned = true;
-    logger.error({ err: err.message }, "redis unavailable — degrading to no-cache mode");
+    logger.error({ err: err.message }, "redis unavailable - degrading to no-cache mode");
   }
 });
 redis.on("ready", () => {

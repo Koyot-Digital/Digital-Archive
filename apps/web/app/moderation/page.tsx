@@ -153,7 +153,7 @@ export default async function ModerationPage({ searchParams }: Props) {
                         </Link>
                       </td>
                       <td className="px-4 py-2.5 text-xs">
-                        <span className="text-fg">{entry.actorLabel ?? "—"}</span>
+                        <span className="text-fg">{entry.actorLabel ?? "-"}</span>
                         <span className="ml-1.5 text-2xs text-faint">{entry.actorType}</span>
                       </td>
                       <td className="px-4 py-2.5 font-mono text-2xs text-muted">
@@ -169,7 +169,7 @@ export default async function ModerationPage({ searchParams }: Props) {
                             entry.targetId
                           )
                         ) : (
-                          "—"
+                          "-"
                         )}
                       </td>
                       <td className="max-w-md px-4 py-2.5">
@@ -210,7 +210,7 @@ export default async function ModerationPage({ searchParams }: Props) {
 /** Compact key=value rendering; long values are truncated, not hidden. */
 function MetadataCell({ metadata }: { metadata: Record<string, unknown> }) {
   const entries = Object.entries(metadata).filter(([, value]) => value !== null && value !== "");
-  if (!entries.length) return <span className="text-2xs text-faint">—</span>;
+  if (!entries.length) return <span className="text-2xs text-faint">-</span>;
 
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1">

@@ -10,7 +10,7 @@
 export const ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 export const ID_LENGTH = 16;
 
-/** Matches exactly one 16-char public ID. Anchored — safe for route params. */
+/** Matches exactly one 16-char public ID. Anchored - safe for route params. */
 export const ID_PATTERN = /^[0-9a-hjkmnp-tv-z]{16}$/;
 
 /** Matches a Roblox user id: 1-20 digits, no leading zero. */

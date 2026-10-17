@@ -20,6 +20,7 @@ import type {
   ModlogAction,
   ModlogSeverity,
   RecordStatus,
+  SubjectPlatform,
   SubjectRelation,
   ThreadRole,
   UserRole,
@@ -111,8 +112,18 @@ export const apiKeys = pgTable(
 export const subjects = pgTable(
   "subjects",
   {
-    /** Roblox user id. Stored as bigint, exposed as a string everywhere. */
-    robloxId: bigint("roblox_id", { mode: "bigint" }).primaryKey(),
+    /** Surrogate key. The platform pair below is the real identity. */
+    id: id16("id").primaryKey(),
+    platform: varchar("platform", { length: 16 })
+      .$type<SubjectPlatform>()
+      .notNull()
+      .default("roblox"),
+    /**
+     * The account's id on its own platform - a Roblox user id or a Discord
+     * snowflake. Stored as bigint, exposed as a string everywhere, because
+     * both exceed what JSON numbers represent exactly.
+     */
+    externalId: bigint("external_id", { mode: "bigint" }).notNull(),
     username: varchar("username", { length: 64 }),
     displayName: varchar("display_name", { length: 64 }),
     avatarUrl: varchar("avatar_url", { length: 2048 }),
@@ -125,9 +136,11 @@ export const subjects = pgTable(
     searchVector: tsvector("search_vector"),
   },
   (t) => ({
+    platformKey: uniqueIndex("subjects_platform_external_key").on(t.platform, t.externalId),
     usernameIdx: index("subjects_username_idx").on(t.username),
     lastLogIdx: index("subjects_last_log_idx").on(t.lastLogAt),
     logCountIdx: index("subjects_log_count_idx").on(t.logCount),
+    platformIdx: index("subjects_platform_idx").on(t.platform, t.logCount),
   }),
 );
 
@@ -135,9 +148,9 @@ export const modlogs = pgTable(
   "modlogs",
   {
     id: id16("id").primaryKey(),
-    robloxId: bigint("roblox_id", { mode: "bigint" })
+    subjectId: id16("subject_id")
       .notNull()
-      .references(() => subjects.robloxId, { onDelete: "cascade" }),
+      .references(() => subjects.id, { onDelete: "cascade" }),
 
     title: varchar("title", { length: 300 }).notNull(),
     bodyMd: text("body_md").notNull().default(""),
@@ -163,7 +176,7 @@ export const modlogs = pgTable(
     revision: integer("revision").notNull().default(1),
     imageCount: smallint("image_count").notNull().default(0),
 
-    /* Discord forum provenance — null for records from any other source. */
+    /* Discord forum provenance - null for records from any other source. */
     discordPostId: varchar("discord_post_id", { length: 24 }),
     discordGuildId: varchar("discord_guild_id", { length: 24 }),
     discordForumId: varchar("discord_forum_id", { length: 24 }),
@@ -192,7 +205,7 @@ export const modlogs = pgTable(
     sourceKey: uniqueIndex("modlogs_source_key").on(t.source, t.sourceId),
     discordPostKey: uniqueIndex("modlogs_discord_post_key").on(t.discordPostId),
     ticketIdx: index("modlogs_ticket_idx").on(t.ticketRef),
-    subjectIdx: index("modlogs_subject_idx").on(t.robloxId, t.occurredAt),
+    subjectIdx: index("modlogs_subject_idx").on(t.subjectId, t.occurredAt),
     createdIdx: index("modlogs_created_idx").on(t.createdAt),
     occurredIdx: index("modlogs_occurred_idx").on(t.occurredAt),
     actionIdx: index("modlogs_action_idx").on(t.action),
@@ -229,8 +242,12 @@ export const images = pgTable(
     modlogId: id16("modlog_id")
       .notNull()
       .references(() => modlogs.id, { onDelete: "cascade" }),
-    /** Denormalised so /:robloxId/:logId/:imageId validates in one query. */
-    robloxId: bigint("roblox_id", { mode: "bigint" }).notNull(),
+    /**
+     * Denormalised so /:platform-modlogs/:subject/:log/:image validates in
+     * one query. Kept in step with the parent modlog by a trigger, so it can
+     * never disagree with the record it hangs off.
+     */
+    subjectId: id16("subject_id").notNull(),
 
     position: smallint("position").notNull().default(0),
     caption: text("caption"),
@@ -255,7 +272,7 @@ export const images = pgTable(
   (t) => ({
     dedupeKey: uniqueIndex("images_modlog_sha_key").on(t.modlogId, t.sha256),
     modlogIdx: index("images_modlog_idx").on(t.modlogId, t.position),
-    subjectIdx: index("images_subject_idx").on(t.robloxId),
+    subjectIdx: index("images_subject_idx").on(t.subjectId),
   }),
 );
 
@@ -391,12 +408,12 @@ export const modlogMessages = pgTable(
 export const subjectRelations = pgTable(
   "subject_relations",
   {
-    robloxId: bigint("roblox_id", { mode: "bigint" })
+    subjectId: id16("subject_id")
       .notNull()
-      .references(() => subjects.robloxId, { onDelete: "cascade" }),
-    relatedRobloxId: bigint("related_roblox_id", { mode: "bigint" })
+      .references(() => subjects.id, { onDelete: "cascade" }),
+    relatedSubjectId: id16("related_subject_id")
       .notNull()
-      .references(() => subjects.robloxId, { onDelete: "cascade" }),
+      .references(() => subjects.id, { onDelete: "cascade" }),
     relation: varchar("relation", { length: 16 })
       .$type<SubjectRelation>()
       .notNull()
@@ -406,8 +423,8 @@ export const subjectRelations = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({
-    pk: uniqueIndex("subject_relations_pkey").on(t.robloxId, t.relatedRobloxId),
-    relatedIdx: index("subject_relations_related_idx").on(t.relatedRobloxId),
+    pk: uniqueIndex("subject_relations_pkey").on(t.subjectId, t.relatedSubjectId),
+    relatedIdx: index("subject_relations_related_idx").on(t.relatedSubjectId),
   }),
 );
 

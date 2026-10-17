@@ -16,18 +16,25 @@ export const metadata: Metadata = {
 
 const READ_ENDPOINTS: [string, string][] = [
   ["GET /stats", "Archive counts, per-source and per-action breakdowns, compression savings."],
-  ["GET /subjects?q=&sort=&page=", "Accounts with at least one published record."],
+  [
+    "GET /subjects?q=&platform=&sort=&page=",
+    "Accounts with at least one published record, on either platform.",
+  ],
   ["GET /modlogs?action=&severity=&page=", "All published records, newest first."],
   ["GET /search?q=", "Full-text search. Supports quoted phrases and -exclusions."],
   [
-    "GET /roblox-modlogs/:robloxId",
-    "One account's records, with the subject and its grouped accounts inlined.",
+    "GET /roblox-modlogs/:accountId",
+    "One Roblox account's records, with the subject and its grouped accounts inlined.",
   ],
   [
-    "GET /roblox-modlogs/:robloxId/:logId",
+    "GET /discord-modlogs/:accountId",
+    "The same, for a Discord account. The platform is part of the account's identity.",
+  ],
+  [
+    "GET /<platform>-modlogs/:accountId/:logId",
     "One record with images, link embeds, subject, grouped accounts and the source thread.",
   ],
-  ["GET /roblox-modlogs/:robloxId/:logId/:imageId", "Image metadata plus its siblings."],
+  ["GET /<platform>-modlogs/:accountId/:logId/:imageId", "Image metadata plus its siblings."],
   ["GET /modlogs/:id", "Flat record lookup by id."],
   ["GET /modlogs/:id/revisions", "Edit history, newest revision first."],
   ["GET /moderators", "Who files records here, counted from the records themselves."],
@@ -104,27 +111,27 @@ images ${PUBLIC_API_BASE}/images/`}
         </pre>
         <ul className="mt-3 space-y-1.5 text-xs leading-5 text-muted">
           <li>
-            <strong className="text-fg">onConflict</strong> —{" "}
+            <strong className="text-fg">onConflict</strong> -{" "}
             <code className="font-mono">merge</code> (default) updates the record unless a human has
             edited it, <code className="font-mono">replace</code> always overwrites,{" "}
             <code className="font-mono">skip</code> never touches an existing record.
           </li>
           <li>
-            <strong className="text-fg">Dedupe</strong> — on{" "}
+            <strong className="text-fg">Dedupe</strong> - on{" "}
             <code className="font-mono">source</code> + <code className="font-mono">sourceId</code>.
             Omit sourceId and the server derives one from the content.
           </li>
           <li>
-            <strong className="text-fg">Partial success</strong> — a failed record is reported by
+            <strong className="text-fg">Partial success</strong> - a failed record is reported by
             index in <code className="font-mono">errors</code>; the rest still land. The response is
             207 if everything failed.
           </li>
           <li>
-            <strong className="text-fg">Limits</strong> — 500 records and 8MB per batch, 24 images
+            <strong className="text-fg">Limits</strong> - 500 records and 8MB per batch, 24 images
             per record.
           </li>
           <li>
-            <strong className="text-fg">Signing</strong> — if the server has{" "}
+            <strong className="text-fg">Signing</strong> - if the server has{" "}
             <code className="font-mono">INGRESS_HMAC_SECRET</code> set, send{" "}
             <code className="font-mono">X-Archive-Signature: sha256=&lt;hex&gt;</code> over the raw
             body.
@@ -173,21 +180,21 @@ images ${PUBLIC_API_BASE}/images/`}
         </pre>
         <ul className="mt-3 space-y-1.5 text-xs leading-5 text-muted">
           <li>
-            <strong className="text-fg">One thread is one record</strong> — a sanction announced
+            <strong className="text-fg">One thread is one record</strong> - a sanction announced
             against four alts stays one event, filed under the first account named, with the others
             stored as grouped accounts.
           </li>
           <li>
-            <strong className="text-fg">Dedupe</strong> — on the post id, so re-scraping a thread
+            <strong className="text-fg">Dedupe</strong> - on the post id, so re-scraping a thread
             updates its record and its replies instead of creating a twin.
           </li>
           <li>
-            <strong className="text-fg">unmapped</strong> — a thread whose title names no Roblox id
+            <strong className="text-fg">unmapped</strong> - a thread whose title names no Roblox id
             has no subject to be filed under. It is returned with a reason rather than failing the
             batch. A batch where nothing maps returns 422.
           </li>
           <li>
-            <strong className="text-fg">Limits</strong> — 500 threads and 64MB per batch; threads
+            <strong className="text-fg">Limits</strong> - 500 threads and 64MB per batch; threads
             carry their whole reply history.
           </li>
         </ul>
@@ -207,7 +214,7 @@ images ${PUBLIC_API_BASE}/images/`}
         </pre>
         <p className="mt-2 text-xs leading-5 text-muted">
           Branch on <code className="font-mono">code</code>, never on the message. Quote{" "}
-          <code className="font-mono">requestId</code> when reporting a failure — it matches the
+          <code className="font-mono">requestId</code> when reporting a failure - it matches the
           server log.
         </p>
       </section>

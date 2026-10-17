@@ -10,7 +10,7 @@ images  https://api.domain.com/digitalarchive/v1/images
 Reads are public. Writes need either a Discord session carrying a role, or an
 API key carrying the matching scope.
 
-**Authentication** — one of:
+**Authentication** - one of:
 
 ```
 Cookie: archive_session=…          browser, set by the OAuth flow
@@ -81,21 +81,44 @@ weighted in that order.
 Accepts quoted phrases and `-exclusions`; malformed queries return no results
 rather than an error.
 
-### `GET /roblox-modlogs/:robloxId`
+### `GET /roblox-modlogs/:accountId` · `GET /discord-modlogs/:accountId`
 
 One account's records, with the subject object inlined. Same filters as
 `/modlogs`. Mirrors the public web URL.
 
+The platform is in the path, not a query parameter, because it is part of the
+account's identity. `(platform, externalId)` is the real key; the same digits
+on the other platform are a different subject and 404 here. Each subject also
+carries a 16-char surrogate `id`, which is what every other row references
+and what survives a username change on the platform itself.
+
+```json
+"subject": {
+  "id": "7pp5gnw6d930hvks",
+  "platform": "roblox",
+  "externalId": "2352644898",
+  "username": "Roveen80",
+  "logCount": 5,
+  "profileUrl": "https://www.roblox.com/users/2352644898/profile",
+  "archiveUrl": "/roblox-modlogs/2352644898"
+}
+```
+
+`profileUrl` is null for a Discord subject: Discord has no public page for a
+bare user id, and the client-only `discord://` deep link is not something to
+put in an href.
+
 Also returns `relatedAccounts`: alts and renames named on this account's
 records, in both directions. Read this before concluding that an empty list
-means an unsanctioned account — one sanction announced against four alts is
+means an unsanctioned account - one sanction announced against four alts is
 stored as **one** record, filed under the first account named, so the other
 three legitimately show zero records of their own.
 
 ```json
 "relatedAccounts": [
-  { "robloxId": "7511229161", "username": "mrlazy296", "relation": "alt",
-    "logCount": 0, "archiveUrl": "/roblox-modlogs/7511229161",
+  { "subjectId": "q7m2…", "platform": "roblox", "externalId": "7511229161",
+    "username": "mrlazy296", "relation": "alt", "logCount": 0,
+    "archiveUrl": "/roblox-modlogs/7511229161",
     "assertedBy": "q4m7x2b9ktp0rsvw" }
 ]
 ```
@@ -104,14 +127,20 @@ three legitimately show zero records of their own.
 `predecessor` (the reverse) or `related` (named together, relationship not
 stated). `assertedBy` is the record that made the claim, so it can be checked.
 
-### `GET /roblox-modlogs/:robloxId/:logId`
+Groupings **cross platforms**: the Discord forum routinely names a Discord
+account and the Roblox account behind it in one title. Those are stored as
+`related` rather than `alt` - "the same person elsewhere" is a different claim
+from "the same person again", and the title does not support the stronger one.
+
+### `GET /<platform>-modlogs/:accountId/:logId`
 
 One record, with `body.markdown`, `body.html` (pre-sanitised), `images`,
 `linkEmbeds`, `evidence`, `subject`, `relatedAccounts` and `thread`.
 
-The `robloxId` is verified against the record, so the route cannot be used to
-render a log under the wrong subject. A `removed` record returns its shell —
-id, title, status, history — with the body, evidence, images **and thread**
+The account *and its platform* are verified against the record, so the route
+cannot be used to render a log under the wrong subject - or under the right
+number on the wrong platform. A `removed` record returns its shell -
+id, title, status, history - with the body, evidence, images **and thread**
 withheld.
 
 `thread` is non-null only for records scraped from a Discord forum. It
@@ -134,13 +163,13 @@ the appeal, the correction and the decision to escalate actually live:
 }
 ```
 
-`avatarUrl` is never null — Discord's own default avatar is substituted — so
+`avatarUrl` is never null - Discord's own default avatar is substituted - so
 a client never has to decide what to draw in a gap. `resolvedFrom` says where
 the name and avatar came from: `discord_api` is authoritative as of
 `fetchedAt`, `scrape` is what the thread looked like when it was captured and
 has not been confirmed since.
 
-### `GET /roblox-modlogs/:robloxId/:logId/:imageId`
+### `GET /<platform>-modlogs/:accountId/:logId/:imageId`
 
 Metadata for one image plus its siblings, so a viewer can page through the
 evidence without another round trip. The bytes come from the images service.
@@ -167,7 +196,7 @@ stay that way.
 ### `GET /discord-users/:discordId`
 
 One Discord identity as the archive currently holds it. 404 if the archive has
-never seen that account — this is a cache of accounts that appear on records,
+never seen that account - this is a cache of accounts that appear on records,
 not a proxy for Discord's API.
 
 ---
@@ -193,21 +222,29 @@ whole reply history.
 }
 ```
 
-The mapping happens server-side: which Roblox account the thread is about
-(the first id in the title), what sanction the body records (`;tban … 3d …`),
-which other accounts it groups, and who took part. Those rules are the
-archive's interpretation of its own source and they change — keeping them here
+Takes either forum. The mapper reads `forum_name` and picks the dialect:
+`roblox-modlogs` threads are Roblox subjects with bot-command bodies,
+`discord-modlogs` threads are Discord subjects with prose bodies, and they
+get different `source` values so the two can never dedupe into each other.
+The subject's platform comes from the id's own shape - a Discord snowflake is
+17+ digits, a Roblox id is 11 - which is why a Roblox id appearing in a
+Discord thread title is still filed as a Roblox subject.
+
+The mapping happens server-side: which account the thread is about (the first
+id in the title), what sanction the body records, which other accounts it
+groups, and who took part. Those rules are the
+archive's interpretation of its own source and they change - keeping them here
 means a re-parse is a deploy of one service, and the scraper can never hold a
 second, divergent reading of the same title.
 
 Everything `POST /ingress` guarantees applies: idempotent per `batchId`,
 partial success, deduplicated on `source` + `sourceId` (here, the post id).
-One addition — a thread the mapper cannot place does **not** fail the batch:
+One addition - a thread the mapper cannot place does **not** fail the batch:
 
 ```json
 "unmapped": [
   { "index": 19, "sourceId": "1536…", "title": "dap123francais (all alt accounts) (Appeal-#6098)",
-    "reason": "no Roblox id in the thread title — the subject cannot be identified, …" }
+    "reason": "no Roblox id in the thread title - the subject cannot be identified, …" }
 ]
 ```
 
@@ -227,8 +264,8 @@ scrape mostly 404s.
 ### `GET /ingress/whoami`
 
 Confirms a credential, its scopes and its rate budget without writing. Point
-cron monitoring here. Also reports `discord.identityRefresh` — whether a bot
-token is configured — and both ingress body limits.
+cron monitoring here. Also reports `discord.identityRefresh` - whether a bot
+token is configured - and both ingress body limits.
 
 ### `POST /discord-users/refresh`
 
@@ -247,7 +284,7 @@ Create one record by hand. Role `moderator`, or scope `ingress:write`.
 ### `PATCH /modlogs/:id`
 
 Role `moderator`. `changeReason` (≥ 3 chars) is **required** alongside at
-least one changed field — the revision history is meant to read as an
+least one changed field - the revision history is meant to read as an
 explanation, not a diff.
 
 ### `POST /modlogs/:id/status`
@@ -259,7 +296,7 @@ reason, and giving it its own URL makes it unmistakable in the audit trail.
 
 ### `DELETE /modlogs/:id`
 
-Role `admin`. A **soft** delete — status moves to `removed`, the row and its
+Role `admin`. A **soft** delete - status moves to `removed`, the row and its
 history stay. Purging outright would break the trail the archive exists to
 keep.
 
@@ -270,7 +307,7 @@ keep.
 ### `GET /images/:id` · `GET /images/:id.webp`
 
 WebP bytes. `?v=thumb` for the 480px variant. `Cache-Control: immutable`,
-one-year TTL, ETag and `If-None-Match` supported — an id never changes what it
+one-year TTL, ETag and `If-None-Match` supported - an id never changes what it
 points at.
 
 Hidden and removed images 404 for everyone but moderators.
@@ -290,7 +327,7 @@ per-file `errors` array, so a mixed batch is not all-or-nothing.
 
 ### `POST /images/fetch`
 
-`{ "modlogId": "…", "urls": [...], "captions": [...] }` — the server downloads
+`{ "modlogId": "…", "urls": [...], "captions": [...] }` - the server downloads
 each URL (DNS-checked against private ranges, redirects re-checked per hop,
 body capped) and converts it.
 
@@ -332,7 +369,7 @@ that user's sessions immediately rather than waiting for the cookie to expire.
 ### `GET /moderation/api-keys` · `POST` · `DELETE /:id`
 
 Role `admin`. The secret in a create response is the only copy that will ever
-exist — only its SHA-256 is stored. A key cannot revoke itself.
+exist - only its SHA-256 is stored. A key cannot revoke itself.
 
 ---
 
@@ -364,7 +401,7 @@ Per minute, keyed by API key when present, then by user, then by IP:
 
 Each key carries its own budget, so one scraper cannot consume another's.
 Responses include `x-ratelimit-limit` and `x-ratelimit-remaining`. If Redis is
-unavailable the limiter fails open — the archive stays readable.
+unavailable the limiter fails open - the archive stays readable.
 
 ## Caching
 

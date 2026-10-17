@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Subject, Viewer } from "@/lib/api";
+import { PLATFORM_LABELS } from "@archive/shared";
 import { SITE_NAME, loginUrl } from "@/lib/api";
 import { cx, formatNumber } from "@/lib/format";
 import { SearchBox } from "./search-box";
@@ -47,7 +48,7 @@ export function Header({ viewer }: { viewer: Viewer }) {
 
       {viewer.devBypass ? (
         <div className="border-t border-sev-medium/30 bg-sev-medium/10 px-4 py-1 text-center text-2xs font-medium text-sev-medium">
-          Authentication is disabled — every visitor has administrator rights. Do not expose this
+          Authentication is disabled - every visitor has administrator rights. Do not expose this
           instance.
         </div>
       ) : null}
@@ -100,7 +101,7 @@ export function Footer() {
     <footer className="mt-20 border-t border-line">
       <div className="mx-auto flex max-w-content flex-col gap-3 px-4 py-8 text-xs text-faint sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <p>
-          {SITE_NAME} — a moderation-record archive. Every record carries its source and its full
+          {SITE_NAME} - a moderation-record archive. Every record carries its source and its full
           edit history.
         </p>
         <nav className="flex gap-4">
@@ -182,28 +183,34 @@ export function SubjectHeader({ subject }: { subject: Subject }) {
         />
       ) : (
         <span className="grid h-14 w-14 place-items-center rounded-full border border-line bg-raised text-lg font-semibold text-faint">
-          {(subject.username ?? subject.robloxId).slice(0, 1).toUpperCase()}
+          {(subject.username ?? subject.externalId).slice(0, 1).toUpperCase()}
         </span>
       )}
 
       <div className="min-w-0 flex-1">
         <h2 className="truncate text-lg font-semibold tracking-tight">
-          {subject.displayName ?? subject.username ?? `Roblox user ${subject.robloxId}`}
+          {subject.displayName ??
+            subject.username ??
+            `${PLATFORM_LABELS[subject.platform]} ${subject.externalId}`}
         </h2>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           {subject.username ? <span>@{subject.username}</span> : null}
-          <span className="font-mono">{subject.robloxId}</span>
-          {/* The glyph says "leaves the archive", so the words need not. */}
-          <a
-            href={subject.profileUrl}
-            target="_blank"
-            rel="noopener noreferrer nofollow"
-            className="link inline-flex items-center gap-1"
-            title="Open this account's Roblox profile"
-          >
-            Roblox
-            <IconExternal className="icon-sm" />
-          </a>
+          <span className="chip">{PLATFORM_LABELS[subject.platform]}</span>
+          <span className="font-mono">{subject.externalId}</span>
+          {/* Discord has no public profile page for a bare user id, so there
+              is nothing honest to link to and the API returns null. */}
+          {subject.profileUrl ? (
+            <a
+              href={subject.profileUrl}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className="link inline-flex items-center gap-1"
+              title={`Open this account's ${PLATFORM_LABELS[subject.platform]} profile`}
+            >
+              {PLATFORM_LABELS[subject.platform]}
+              <IconExternal className="icon-sm" />
+            </a>
+          ) : null}
         </p>
       </div>
 

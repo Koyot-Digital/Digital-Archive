@@ -16,18 +16,57 @@ export const MODLOG_SEVERITIES = ["info", "low", "medium", "high", "critical"] a
 export type ModlogSeverity = (typeof MODLOG_SEVERITIES)[number];
 
 /**
- * published — visible to everyone.
- * hidden    — visible to moderators only (under review / disputed).
- * removed   — soft-deleted; body withheld from the public API, row retained so
+ * published - visible to everyone.
+ * hidden    - visible to moderators only (under review / disputed).
+ * removed   - soft-deleted; body withheld from the public API, row retained so
  *             the audit trail and revision history stay intact.
  */
 export const RECORD_STATUSES = ["published", "hidden", "removed"] as const;
 export type RecordStatus = (typeof RECORD_STATUSES)[number];
 
 /**
+ * The platforms the archive holds moderation records about.
+ *
+ * A subject is an account on one of these. They are kept as separate
+ * namespaces rather than one pool of numbers because they *are* separate: a
+ * Roblox id and a Discord snowflake are both integers, but nothing guarantees
+ * they never collide, and a subject page has to know which profile to link to
+ * and which URL to live at.
+ */
+export const SUBJECT_PLATFORMS = ["roblox", "discord"] as const;
+export type SubjectPlatform = (typeof SUBJECT_PLATFORMS)[number];
+
+export const PLATFORM_LABELS: Record<SubjectPlatform, string> = {
+  roblox: "Roblox",
+  discord: "Discord",
+};
+
+/** URL segment each platform's subjects live under. */
+export const PLATFORM_PATHS: Record<SubjectPlatform, string> = {
+  roblox: "roblox-modlogs",
+  discord: "discord-modlogs",
+};
+
+/** The account's page on the platform itself, when one can be addressed. */
+export function platformProfileUrl(
+  platform: SubjectPlatform,
+  externalId: string,
+): string | null {
+  // Discord has no public profile URL for a bare user id; the client-only
+  // `discord://` deep link is not something to put in an href.
+  return platform === "roblox"
+    ? `https://www.roblox.com/users/${externalId}/profile`
+    : null;
+}
+
+export function subjectArchivePath(platform: SubjectPlatform, externalId: string): string {
+  return `/${PLATFORM_PATHS[platform]}/${externalId}`;
+}
+
+/**
  * How one Roblox account in the archive relates to another.
  *
- * Moderation threads routinely name several accounts at once — a main and its
+ * Moderation threads routinely name several accounts at once - a main and its
  * alts, or an account that was abandoned for a new one. The relation is kept
  * so the archive can group them without claiming they are the same row.
  */

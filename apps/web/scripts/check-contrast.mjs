@@ -125,6 +125,6 @@ if (failures.length) {
 }
 
 console.log(
-  `Palette OK — ${themes.length} themes, all tokens neutral, ` +
+  `Palette OK - ${themes.length} themes, all tokens neutral, ` +
     `text >= ${TEXT_MIN}:1, severity ramp >= ${GRAPHIC_MIN}:1 and ascending.`,
 );

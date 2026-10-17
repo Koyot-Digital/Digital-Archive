@@ -7,7 +7,7 @@ import {
 } from "@archive/shared";
 import { config } from "../config.js";
 import { db } from "../db/client.js";
-import { discordUsers } from "../db/schema.js";
+import { discordUsers, subjects } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 
 /**
@@ -17,7 +17,7 @@ import { logger } from "../lib/logger.js";
  * are a starting point, not the answer: display names and avatars change, and
  * a scrape from August is already stale. So identities are stored once,
  * seeded from the scrape so nothing ever renders blank, and then refreshed
- * from `GET /users/{id}` — the authoritative source — in the background.
+ * from `GET /users/{id}` - the authoritative source - in the background.
  *
  * Two constraints shape everything here:
  *
@@ -83,7 +83,7 @@ export function hasBotToken(): boolean {
  * Recover the avatar hash from a scraped CDN URL.
  *
  * Worth doing even without a bot token: a scrape hands over whatever size it
- * happened to capture — usually `?size=1024` — and the archive renders
+ * happened to capture - usually `?size=1024` - and the archive renders
  * avatars at 20-40px. Keeping the hash means every size is reconstructible,
  * so a 28px slot fetches 128px of image instead of a megapixel of it.
  */
@@ -98,7 +98,7 @@ function avatarHashFrom(url: string | undefined): string | null {
  *
  * `coalesce(excluded.x, existing.x)` throughout: a partial hint must never
  * blank a field that is already known. A row already resolved through the API
- * keeps that provenance — a stale scrape does not get to overwrite a fresh
+ * keeps that provenance - a stale scrape does not get to overwrite a fresh
  * API answer, though it may still fill a field the API left null.
  */
 export async function seedDiscordUsers(hints: DiscordUserHint[]): Promise<number> {
@@ -166,7 +166,7 @@ type FetchOutcome =
 /**
  * One `GET /users/{id}`.
  *
- * A bot token is required — the `identify` OAuth scope only ever describes
+ * A bot token is required - the `identify` OAuth scope only ever describes
  * the signed-in user, and the archive needs to look up accounts that have
  * never visited it. 404 is a real answer (the account is gone), so it is
  * distinguished from a transport failure: one should stop us retrying, the
@@ -208,6 +208,30 @@ async function fetchDiscordUser(id: string): Promise<FetchOutcome> {
   }
 }
 
+/**
+ * Copy a resolved identity onto the matching Discord *subject*, if there is one.
+ *
+ * On the Discord forum the account being moderated is itself a Discord
+ * account, so the same lookup that gives a moderator their avatar gives the
+ * subject theirs. Without this, a Discord subject page would show the
+ * username scraped from the thread title and no avatar at all - while the
+ * moderator who filed the record, two inches away, had both.
+ *
+ * `coalesce` on the way in: the API is authoritative for a Discord account,
+ * so it overwrites rather than fills, but it never blanks a field it has no
+ * value for.
+ */
+async function applyToSubject(user: DiscordUserResponse, avatarUrl: string): Promise<void> {
+  await db
+    .update(subjects)
+    .set({
+      username: user.username,
+      displayName: user.global_name ?? raw`${subjects.displayName}`,
+      avatarUrl,
+    })
+    .where(and(eq(subjects.platform, "discord"), eq(subjects.externalId, BigInt(user.id))));
+}
+
 async function storeResolved(user: DiscordUserResponse): Promise<void> {
   const avatarUrl =
     discordAvatarUrl(user.id, user.avatar, 256) ??
@@ -241,6 +265,8 @@ async function storeResolved(user: DiscordUserResponse): Promise<void> {
         fetchError: raw`null`,
       },
     });
+
+  await applyToSubject(user, avatarUrl);
 }
 
 async function recordFailure(id: string, reason: string): Promise<void> {
@@ -271,8 +297,8 @@ export interface ResolveSummary {
 /**
  * Refresh a set of identities from the Discord API.
  *
- * Serial by design. Parallelising would gain nothing — the limit is Discord's
- * global bucket, not our concurrency — and would turn a 429 into a burst of
+ * Serial by design. Parallelising would gain nothing - the limit is Discord's
+ * global bucket, not our concurrency - and would turn a 429 into a burst of
  * them. The whole batch is bounded by `MAX_WAIT_MS` so a background refresh
  * can never pin a worker.
  */
@@ -292,7 +318,7 @@ export async function resolveDiscordUsers(ids: string[]): Promise<ResolveSummary
     // cannot refresh them. Said once per batch, not once per id.
     logger.debug(
       { count: wanted.length },
-      "DISCORD_BOT_TOKEN not set — keeping scraped usernames and avatars",
+      "DISCORD_BOT_TOKEN not set - keeping scraped usernames and avatars",
     );
     return { ...summary, skipped: wanted.length, tokenMissing: true };
   }
@@ -356,6 +382,41 @@ export async function resolveDiscordUsers(ids: string[]): Promise<ResolveSummary
 }
 
 /**
+ * Enrol every Discord subject in the identity table.
+ *
+ * A Discord subject is an account like any other, and it should get the same
+ * API-resolved name and avatar a moderator does. Ingest seeds them as it
+ * goes; this closes the gap for rows that predate that, and makes the admin
+ * refresh self-healing rather than dependent on a one-off backfill.
+ *
+ * Returns how many were newly enrolled.
+ */
+export async function enrolDiscordSubjects(): Promise<number> {
+  const rows = await db
+    .select({ externalId: subjects.externalId, username: subjects.username })
+    .from(subjects)
+    .where(
+      and(
+        eq(subjects.platform, "discord"),
+        // Only those the identity table has never seen.
+        raw`not exists (
+          select 1 from ${discordUsers} d where d.id = ${subjects.externalId}::text
+        )`,
+      ),
+    );
+  if (!rows.length) return 0;
+
+  return seedDiscordUsers(
+    rows.map((row) => ({
+      id: row.externalId.toString(),
+      ...(row.username ? { username: row.username } : {}),
+      bot: false,
+      role: "commenter" as const,
+    })),
+  );
+}
+
+/**
  * Refresh whatever is most stale.
  *
  * Exposed for an admin-triggered sweep: identities drift whether or not
@@ -363,6 +424,9 @@ export async function resolveDiscordUsers(ids: string[]): Promise<ResolveSummary
  * without re-importing.
  */
 export async function refreshStaleDiscordUsers(limit = 50): Promise<ResolveSummary> {
+  // Enrol first, so a subject that has never been looked up is eligible.
+  await enrolDiscordSubjects();
+
   if (!hasBotToken()) {
     return { requested: 0, resolved: 0, missing: 0, failed: 0, skipped: 0, tokenMissing: true };
   }

@@ -120,7 +120,7 @@ export async function pruneExpiredSessions(): Promise<number> {
  * Role for a freshly authenticated Discord account.
  *
  * Driven entirely by env allowlists: there is no in-app path to grant
- * yourself privileges, which is the point — the archive is public to read and
+ * yourself privileges, which is the point - the archive is public to read and
  * closed to write.
  */
 export function roleForDiscordId(discordId: string): UserRole {
@@ -209,7 +209,7 @@ export async function ensureDevUser(): Promise<SessionUser> {
     .returning();
 
   if (inserted[0]) return toSessionUser(inserted[0]);
-  // Lost the race against another worker — read it back.
+  // Lost the race against another worker - read it back.
   const row = await db
     .select()
     .from(users)

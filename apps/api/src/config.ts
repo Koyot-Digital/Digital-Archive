@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { subjectArchivePath, type SubjectPlatform } from "@archive/shared";
 
 /**
  * Environment parsing.
@@ -64,7 +65,7 @@ const envSchema = z
 
     /**
      * Bot token used to resolve the Discord accounts that appear on scraped
-     * records — the moderator who filed a log, and whoever argued about it.
+     * records - the moderator who filed a log, and whoever argued about it.
      *
      * Separate from the OAuth credentials above and genuinely optional: the
      * scrape already carries the usernames and avatars it saw, so without a
@@ -145,9 +146,9 @@ export const config = {
     return `${env.API_ORIGIN}${env.API_PREFIX}/images/${id}.webp${suffix}`;
   },
 
-  /** Canonical web URL for a modlog. */
-  modlogUrl(robloxId: string, id: string): string {
-    return `${env.WEB_ORIGIN}/roblox-modlogs/${robloxId}/${id}`;
+  /** Canonical web URL for a modlog, under its subject's platform path. */
+  modlogUrl(platform: SubjectPlatform, externalId: string, id: string): string {
+    return `${env.WEB_ORIGIN}${subjectArchivePath(platform, externalId)}/${id}`;
   },
 
   /** Base URL for internal text -> images calls. */
