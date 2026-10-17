@@ -1,32 +1,52 @@
 # Tunnels
 
-Three tunnels, one per surface. Each gets its own token, its own container and
-its own failure domain, so saturating the image tunnel cannot slow archive
-reads.
+Two tunnels, one per zone. Each gets its own token and its own cloudflared
+container, so the web UI and the API have separate ingress paths and separate
+failure domains.
 
-| Tunnel          | Public hostname      | Path                              | Origin              |
-| --------------- | -------------------- | --------------------------------- | ------------------- |
-| `archive-web`   | `archive.domain.com` | *(none - all paths)*              | `http://caddy:8080` |
-| `archive-text`  | `api.domain.com`     | *(none - all paths)*              | `http://caddy:8081` |
-| `archive-images`| `api.domain.com`     | `digitalarchive/v1/images/.*`     | `http://caddy:8082` |
+| Tunnel         | Zone          | Public hostname        | Path                                  | Origin              |
+| -------------- | ------------- | ---------------------- | ------------------------------------- | ------------------- |
+| `archive-web`  | `chrisrelf.cc`| `archive.chrisrelf.cc` | *(none - all paths)*                  | `http://caddy:8080` |
+| `archive-api`  | `relf.cc`     | `api.relf.cc`          | `^/?digitalarchive/v1/images(/.*)?$`  | `http://caddy:8082` |
+| `archive-api`  | `relf.cc`     | `api.relf.cc`          | *(none - all paths)*                  | `http://caddy:8081` |
 
-Cloudflare matches the **most specific path first**, so the images rule wins
-for `api.domain.com/digitalarchive/v1/images/...` and everything else on that
-hostname falls through to the text tunnel.
+Note the last two rows: **both are on the same tunnel.** A public hostname is a
+CNAME to one tunnel's `<uuid>.cfargotunnel.com`, and a DNS name holds exactly
+one CNAME - so one hostname cannot be split across two tunnels. The text and
+images listeners are split by a path rule *within* the api tunnel instead.
 
 ## Setting them up (dashboard)
 
-For each of the three, in **Zero Trust → Networks → Tunnels**:
+For each tunnel, in **Zero Trust → Networks → Tunnels**:
 
 1. **Create a tunnel**, name it as in the table, choose **Cloudflared**.
 2. Copy the token out of the install command - just the long string after
-   `--token`. Put it in `.env` as `TUNNEL_TOKEN_WEB`, `TUNNEL_TOKEN_TEXT` or
-   `TUNNEL_TOKEN_IMAGES`.
-3. Add a **public hostname** with the hostname, path and origin from the table.
-   Service type is **HTTP** (TLS terminates at Cloudflare; Caddy speaks plain
-   HTTP on the compose network).
-4. Under **Additional application settings → HTTP Settings**, leave
-   `No TLS Verify` off - there is no TLS on the origin leg at all.
+   `--token`. Put it in `.env` as `TUNNEL_TOKEN_WEB` or `TUNNEL_TOKEN_API`.
+3. Add the **public hostname** rows from the table. Service type is **HTTP**
+   (TLS terminates at Cloudflare; Caddy speaks plain HTTP on the compose
+   network, and the origin leg has no TLS at all - so leave `No TLS Verify`
+   off under **Additional application settings → HTTP Settings**).
+
+For `archive-api`, **add the images row first.** Rules are evaluated top to
+bottom, so a catch-all sitting above the images rule swallows every image
+request and sends it to the text listener, whose body limit is 2MB rather than
+32MB - large uploads would fail with a 413 and nothing in the API logs.
+
+### Why that path regex
+
+The **Path** field is a Go-syntax regular expression, not a glob:
+
+```
+^/?digitalarchive/v1/images(/.*)?$
+```
+
+- `/?` - the dashboard shows a leading `/` next to the field and reports differ
+  on whether the value is matched with or without it. Making the slash optional
+  is correct either way.
+- `(/.*)?$` - matches both `/digitalarchive/v1/images/<id>.webp` (the GET) and
+  the bare `/digitalarchive/v1/images` (the upload POST). A pattern like
+  `images/.*` matches only the first, which quietly routes uploads to the 2MB
+  text listener.
 
 Then:
 
@@ -34,7 +54,7 @@ Then:
 make up-tunnels
 ```
 
-The `tunnels` compose profile keeps the three cloudflared containers out of a
+The `tunnels` compose profile keeps the two cloudflared containers out of a
 plain `make up`, which is what you want while developing locally.
 
 ## Edge cache rules
@@ -42,15 +62,15 @@ plain `make up`, which is what you want while developing locally.
 The origin already sends correct `Cache-Control`, so the useful thing to add
 at the edge is a cache rule that lets Cloudflare honour it:
 
-- **`api.domain.com/digitalarchive/v1/images/*`** - Cache Level: Cache
+- **`api.relf.cc/digitalarchive/v1/images/*`** - Cache Level: Cache
   Everything, Edge TTL: *Respect origin*. Image bytes are immutable per id, so
   this is where almost all of the traffic should stop.
-- **`api.domain.com/digitalarchive/v1/*`** - Cache Level: Standard, and
+- **`api.relf.cc/digitalarchive/v1/*`** - Cache Level: Standard, and
   **bypass cache on cookie** `archive_session`. Archive reads vary by role;
   the origin sets `Vary: Cookie` and `private` for moderators, but an explicit
   bypass rule means a misconfiguration cannot leak a hidden record into a
   shared cache.
-- **`api.domain.com/digitalarchive/v1/ingress*`** and `/auth/*` - Cache Level:
+- **`api.relf.cc/digitalarchive/v1/ingress*`** and `/auth/*` - Cache Level:
   Bypass.
 
 ## WAF
@@ -64,13 +84,20 @@ Two rules worth having:
   the endpoint is not bound on a public listener, but it costs nothing to stop
   it three layers out.
 
-## Alternative: a separate hostname
+## If you later want images on their own tunnel
 
-If path-based tunnel splitting feels fragile, give the images API its own
-hostname instead:
+A third tunnel only becomes possible by giving images their own hostname, since
+the constraint is one hostname per tunnel:
 
-- `images.domain.com` → `http://caddy:8082`
+- `img.relf.cc` → `http://caddy:8082`
 
-Then set `API_ORIGIN` for image URLs accordingly. The only code change is
-`config.imageUrl()` in `apps/api/src/config.ts`; nothing else constructs image
-URLs.
+That needs a code change as well as a DNS record, in two places, because image
+URLs are built independently on each side:
+
+- `config.imageUrl()` in `apps/api/src/config.ts` composes them from
+  `API_ORIGIN` + `API_PREFIX` - this is what ingress and upload responses hand
+  back, and what gets persisted.
+- `PUBLIC_API_BASE` in `apps/web/lib/api.ts` composes them for the browser.
+
+Both would need an images base of their own, and `web` rebuilt - its copy is
+baked in at build time as a `NEXT_PUBLIC_*` arg.

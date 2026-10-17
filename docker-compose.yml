@@ -235,11 +235,20 @@ services:
       web: { condition: service_started }
     networks: [internal]
 
-  # ──────────────────────── tunnels (one per surface) ────────────────────────
-  # Each token comes from its own Cloudflare tunnel. Point the tunnel's public
-  # hostname at the matching caddy port below.
-  #   archive.domain.com -> http://caddy:8080
-  #   api.domain.com     -> http://caddy:8081   (text, and /images/* proxied on)
+  # ─────────────────────── tunnels (one per zone) ───────────────────────
+  # Two tunnels, because a Cloudflare hostname is a CNAME to one tunnel's
+  # <uuid>.cfargotunnel.com and a name holds exactly one CNAME - so a single
+  # hostname cannot be split across two tunnels. The text/images split is a
+  # path rule *inside* the api tunnel instead, which is why both caddy ports
+  # appear under one token:
+  #
+  #   archive.chrisrelf.cc  ->  http://caddy:8080
+  #   api.relf.cc           ->  http://caddy:8081
+  #     ^/?digitalarchive/v1/images(/.*)?$  ->  http://caddy:8082
+  #
+  # Order matters in the dashboard: the images rule must sit above the
+  # catch-all or every image request lands on the text listener, whose body
+  # limit is 2MB rather than 32MB.
   tunnel-web:
     image: cloudflare/cloudflared:latest
     <<: [*restart]
@@ -249,20 +258,11 @@ services:
     networks: [internal]
     profiles: [tunnels]
 
-  tunnel-text:
+  tunnel-api:
     image: cloudflare/cloudflared:latest
     <<: [*restart]
     logging: *logging
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN_TEXT}
-    depends_on: [caddy]
-    networks: [internal]
-    profiles: [tunnels]
-
-  tunnel-images:
-    image: cloudflare/cloudflared:latest
-    <<: [*restart]
-    logging: *logging
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN_IMAGES}
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN_API}
     depends_on: [caddy]
     networks: [internal]
     profiles: [tunnels]

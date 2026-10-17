@@ -102,7 +102,7 @@ banner the whole time this is true, and the API **refuses to boot** with
 cp .env.example .env    # fill in the real values, set AUTH_ENABLED=true
 make up                 # build and start everything except the tunnels
 make apikey NAME="nightly scraper" SCOPES=ingress:write,images:write
-make up-tunnels         # add the three cloudflared containers
+make up-tunnels         # add the two cloudflared containers
 ```
 
 Migrations run automatically at boot, behind a Postgres advisory lock, so two

@@ -54,7 +54,7 @@ up: ## Build and start everything except the tunnels
 	$(COMPOSE) up -d --build
 
 .PHONY: up-tunnels
-up-tunnels: ## Start the stack including the three cloudflared tunnels
+up-tunnels: ## Start the stack including the two cloudflared tunnels
 	$(COMPOSE) --profile tunnels up -d --build
 
 .PHONY: down

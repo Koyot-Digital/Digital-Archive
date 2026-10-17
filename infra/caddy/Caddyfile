@@ -5,13 +5,15 @@
 #  network and never needs a certificate. Each listener corresponds to one
 #  Cloudflare tunnel:
 #
-#    :8080  archive.domain.com                              -> web
-#    :8081  api.domain.com                                  -> api-text
-#    :8082  api.domain.com/digitalarchive/v1/images/*       -> api-images
+#    :8080  archive.chrisrelf.cc                            -> web
+#    :8081  api.relf.cc                                     -> api-text
+#    :8082  api.relf.cc/digitalarchive/v1/images*           -> api-images
 #
-#  Splitting the API across two listeners (and two tunnels) is the point of
-#  the layout: image traffic is large, cacheable and bursty, archive reads are
-#  small and latency-sensitive, and neither should be able to starve the other.
+#  Splitting the API across two listeners is the point of the layout: image
+#  traffic is large, cacheable and bursty, archive reads are small and
+#  latency-sensitive, and neither should be able to starve the other. The two
+#  listeners share one tunnel (one hostname, one CNAME, one tunnel), so the
+#  split is made by a path rule on the api tunnel - see docker-compose.yml.
 # ═════════════════════════════════════════════════════════════════════════════
 
 {
@@ -62,10 +64,12 @@
 	import common
 	encode zstd gzip
 
-	# Belt and braces: even if the images tunnel is misconfigured and image
+	# Belt and braces: even if the images path rule is misconfigured and image
 	# requests arrive here, they still reach the right service rather than
-	# 404ing against the text API.
-	handle {$API_PREFIX}/images/* {
+	# 404ing against the text API. Matched without a slash before the `*` on
+	# purpose - uploads POST to the bare `/images`, so `/images/*` would miss
+	# them and drop them on the catch-all below with its 2MB body limit.
+	handle {$API_PREFIX}/images* {
 		reverse_proxy api-images:{$IMAGES_PORT} {
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-Proto https
