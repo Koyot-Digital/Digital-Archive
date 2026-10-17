@@ -78,7 +78,7 @@ export default async function ImagePage({ params }: Props) {
         description={
           <>
             From{" "}
-            <Link href={modlog.url} className="text-accent hover:underline">
+            <Link href={modlog.url} className="link">
               {modlog.title}
             </Link>
           </>

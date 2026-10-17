@@ -85,7 +85,7 @@ export default async function SubjectsPage({ searchParams }: Props) {
                   )}
 
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-fg group-hover:text-accent">
+                    <p className="truncate text-sm link-block font-medium text-fg">
                       {subject.displayName ?? subject.username ?? `Roblox user ${subject.robloxId}`}
                     </p>
                     <p className="truncate text-2xs text-faint">

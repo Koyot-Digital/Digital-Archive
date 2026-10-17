@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { Modlog } from "@/lib/api";
 import { formatDate, formatNumber } from "@/lib/format";
-import { ActionBadge, SeverityBadge, StatusBadge, Tag } from "./badges";
+import { ActionBadge, Meta, SeverityBadge, StatusBadge, Tag } from "./badges";
+import { IconImage, IconRevision, IconThread, IconTicket } from "./icons";
 
 /**
  * One row in a list of modlogs.
@@ -47,24 +48,33 @@ export function ModlogCard({ modlog, showSubject = false }: { modlog: Modlog; sh
             <ActionBadge action={modlog.action} />
             <StatusBadge status={modlog.status} />
             {modlog.imageCount > 0 ? (
-              <span className="text-2xs text-faint">
-                {formatNumber(modlog.imageCount)} image{modlog.imageCount === 1 ? "" : "s"}
-              </span>
+              <Meta
+                icon={IconImage}
+                label={`${formatNumber(modlog.imageCount)} image${modlog.imageCount === 1 ? "" : "s"}`}
+              >
+                {formatNumber(modlog.imageCount)}
+              </Meta>
             ) : null}
             {/* A contested record is worth spotting from the list: a long
                 thread usually means an appeal or a disagreement. */}
             {modlog.threadReplyCount > 0 ? (
-              <span className="text-2xs text-faint">
-                {formatNumber(modlog.threadReplyCount)} repl
-                {modlog.threadReplyCount === 1 ? "y" : "ies"}
-              </span>
+              <Meta
+                icon={IconThread}
+                label={`${formatNumber(modlog.threadReplyCount)} ${
+                  modlog.threadReplyCount === 1 ? "reply" : "replies"
+                } on the source thread`}
+              >
+                {formatNumber(modlog.threadReplyCount)}
+              </Meta>
             ) : null}
             {modlog.ticketRef ? (
-              <span className="font-mono text-2xs text-faint">{modlog.ticketRef}</span>
+              <Meta icon={IconTicket} label={`Ticket ${modlog.ticketRef}`}>
+                <span className="font-mono">{modlog.ticketRef.replace(/^#/, "")}</span>
+              </Meta>
             ) : null}
           </div>
 
-          <h3 className="mt-2 truncate text-[0.9375rem] font-medium text-fg group-hover:text-accent">
+          <h3 className="link-block mt-2 truncate text-[0.9375rem] font-medium text-fg">
             {modlog.title}
           </h3>
 
@@ -78,19 +88,17 @@ export function ModlogCard({ modlog, showSubject = false }: { modlog: Modlog; sh
             <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted">{modlog.excerpt}</p>
           ) : null}
 
+          {/* Provenance. No bullet separators: the icons already divide it. */}
           <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-2xs text-faint">
             <time dateTime={date} className="tabular-nums">
               {formatDate(date)}
             </time>
-            <span aria-hidden>·</span>
             <span>{modlog.source}</span>
             {modlog.revision > 1 ? (
-              <>
-                <span aria-hidden>·</span>
-                <span>rev {modlog.revision}</span>
-              </>
+              <Meta icon={IconRevision} label={`Revision ${modlog.revision}`}>
+                {modlog.revision}
+              </Meta>
             ) : null}
-            <span aria-hidden>·</span>
             <span className="font-mono">{modlog.id}</span>
           </div>
 

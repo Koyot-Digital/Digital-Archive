@@ -67,6 +67,16 @@ make seed             # sample records so the UI is not empty
 make dev              # api-text :4001 · api-images :4002 · web :3000
 ```
 
+Point `DATABASE_URL` and `REDIS_URL` at `127.0.0.1` for a non-Docker run —
+`.env.example` has both lines commented out ready to swap. `make dev` reads
+the repo-root `.env` for all three services, so it is the only file to edit.
+
+Have a real scrape instead of sample data? Load it directly and skip `seed`:
+
+```sh
+make import FILE=./roblox-modlogs-….jsonl IMAGES=1
+```
+
 `AUTH_ENABLED=false` in `.env.example`, so every request is treated as an
 administrator and you can click around immediately. The web UI shows a warning
 banner the whole time this is true, and the API **refuses to boot** with
@@ -316,11 +326,49 @@ not a complete backup.
 
 ---
 
+## Interface
+
+**Greyscale, with no hue at all.** Every palette token is a true grey, in both
+themes. Two consequences, both handled rather than tolerated:
+
+- **Severity cannot be a colour scale**, so it is drawn as a stepped meter —
+  one filled bar for `info` up to five for `critical`. Rank reads as a
+  *quantity* rather than as a shade, which matters because adjacent greys sit
+  only ~1.5:1 apart and value alone would be unreliable. The accessible name
+  is always the severity word.
+- **Links cannot be "the blue text"**, so they carry a permanent quiet
+  underline that firms up on hover (`.link`), and rows that are themselves
+  links underline their title on hover (`.link-block`).
+
+**Icons carry the chrome; words carry the meaning.** Reply and attachment
+counts, ticket references, thread state, relations and the provenance sidebar
+are glyphs plus a number, with the phrase in `title` and an `sr-only` label —
+a tooltip is not readable by a screen reader and is unreachable by touch, so
+icons standing in for text always have both. What stays in words is the
+record's substance: the action, the severity label, the status of a withheld
+record. There is no icon vocabulary for "content deletion" that a reader
+would know without being taught one.
+
+The set is hand-written inline SVG in
+[`components/icons.tsx`](apps/web/components/icons.tsx) — two dozen glyphs on
+a 24-unit grid, stroked in `currentColor`, shipped in the server-rendered HTML
+with no extra request and no dependency.
+
+`pnpm --filter @archive/web check:contrast` enforces all of it: tokens must be
+neutral, text must clear 4.5:1 against both `--bg` and `--surface`, the
+severity ramp must clear 3:1 and stay monotonic. It runs as part of
+`pnpm typecheck`.
+
+---
+
 ## Known gaps
 
 - The web UI is read-only. Creating and editing records goes through the API
   (`POST /modlogs`, `PATCH /modlogs/:id`); there is no editor form yet.
 - Image uploads from the browser are not wired to a UI either — the endpoint
   exists and takes multipart, but you will be using `curl` or the scraper.
-- No automated tests. The type system and the database constraints carry more
-  weight than usual as a result.
+- No automated tests beyond the palette check above. The type system and the
+  database constraints carry more weight than usual as a result.
+- `pnpm build` and `pnpm dev` share `apps/web/.next`, so running a build while
+  the dev server is up leaves it serving 500s until `.next` is cleared and dev
+  is restarted.

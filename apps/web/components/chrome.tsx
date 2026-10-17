@@ -4,6 +4,7 @@ import { SITE_NAME, loginUrl } from "@/lib/api";
 import { cx, formatNumber } from "@/lib/format";
 import { SearchBox } from "./search-box";
 import { ThemeToggle } from "./theme-toggle";
+import { IconExternal } from "./icons";
 
 /** Top bar. Sticky, hairline-bordered, deliberately quiet. */
 export function Header({ viewer }: { viewer: Viewer }) {
@@ -189,22 +190,19 @@ export function SubjectHeader({ subject }: { subject: Subject }) {
         <h2 className="truncate text-lg font-semibold tracking-tight">
           {subject.displayName ?? subject.username ?? `Roblox user ${subject.robloxId}`}
         </h2>
-        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+        <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           {subject.username ? <span>@{subject.username}</span> : null}
-          <span aria-hidden className="text-faint">
-            ·
-          </span>
           <span className="font-mono">{subject.robloxId}</span>
-          <span aria-hidden className="text-faint">
-            ·
-          </span>
+          {/* The glyph says "leaves the archive", so the words need not. */}
           <a
             href={subject.profileUrl}
             target="_blank"
             rel="noopener noreferrer nofollow"
-            className="text-accent hover:underline"
+            className="link inline-flex items-center gap-1"
+            title="Open this account's Roblox profile"
           >
-            Roblox profile ↗
+            Roblox
+            <IconExternal className="icon-sm" />
           </a>
         </p>
       </div>

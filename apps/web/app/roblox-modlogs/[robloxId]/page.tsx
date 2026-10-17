@@ -137,7 +137,7 @@ export default async function SubjectPage({ params, searchParams }: Props) {
 
       <p className="mt-4 text-xs text-faint">
         Something inaccurate?{" "}
-        <Link href="/about#corrections" className="text-accent hover:underline">
+        <Link href="/about#corrections" className="link">
           How corrections work
         </Link>
         .

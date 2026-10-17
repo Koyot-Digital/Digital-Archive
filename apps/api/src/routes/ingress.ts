@@ -331,7 +331,16 @@ async function applyBatch(
     });
   }
 
-  reply.status(result.counts.failed && !result.counts.created ? 207 : 200);
+  /**
+   * 207 means "nothing landed", not "something failed".
+   *
+   * Written as created-or-updated rather than created alone: a re-scrape
+   * legitimately creates nothing, and a batch that refreshed 499 records
+   * alongside one unreadable thread title has not partially failed in any
+   * sense a caller should alert on.
+   */
+  const landed = result.counts.created + result.counts.updated;
+  reply.status(result.counts.failed && !landed ? 207 : 200);
   return result;
 }
 

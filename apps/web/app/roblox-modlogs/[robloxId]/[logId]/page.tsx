@@ -12,6 +12,17 @@ import { RelatedAccounts } from "@/components/related-accounts";
 import { RevisionHistory } from "@/components/revision-history";
 import { ThreadPanel } from "@/components/thread";
 import { DiscordChip } from "@/components/discord-identity";
+import {
+  IconAccounts,
+  IconArchiveClock,
+  IconAuthor,
+  IconChannel,
+  IconClock,
+  IconExternal,
+  IconImage,
+  IconRevision,
+  IconTicket,
+} from "@/components/icons";
 
 /**
  * archive.domain.com/roblox-modlogs/[robloxId]/[16-char id]
@@ -162,57 +173,59 @@ export default async function ModlogPage({ params }: Props) {
             {/* The moderator who filed it comes first: on a moderation
                 record, "who says so" outranks every other fact here. */}
             {modlog.thread?.author ? (
-              <Fact label="Filed by">
+              <Fact icon={IconAuthor} label="Filed by">
                 <DiscordChip user={modlog.thread.author} size="sm" />
               </Fact>
             ) : null}
-            <Fact label="Occurred">
+            <Fact icon={IconClock} label="Occurred">
               {modlog.occurredAt ? formatDateTime(modlog.occurredAt) : "Not recorded"}
             </Fact>
-            <Fact label="Archived">{formatDateTime(modlog.createdAt)}</Fact>
+            <Fact icon={IconArchiveClock} label="Archived">
+              {formatDateTime(modlog.createdAt)}
+            </Fact>
             {modlog.updatedAt !== modlog.createdAt ? (
-              <Fact label="Last edited">{formatDateTime(modlog.updatedAt)}</Fact>
+              <Fact icon={IconRevision} label="Last edited">
+                {formatDateTime(modlog.updatedAt)}
+              </Fact>
             ) : null}
-            <Fact label="Source">
+            <Fact icon={IconExternal} label="Source">
               {modlog.sourceUrl ? (
                 <a
                   href={modlog.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
-                  className="text-accent hover:underline"
+                  className="link"
                 >
-                  {modlog.source} ↗
+                  {modlog.source}
                 </a>
               ) : (
                 modlog.source
               )}
             </Fact>
             {modlog.ticketRef ? (
-              <Fact label="Ticket">
+              <Fact icon={IconTicket} label="Ticket">
                 <span className="select-all font-mono text-xs">{modlog.ticketRef}</span>
               </Fact>
             ) : null}
             {modlog.thread?.forumName ? (
-              <Fact label="Channel">
+              <Fact icon={IconChannel} label="Channel">
                 <span className="break-words">{modlog.thread.forumName}</span>
               </Fact>
             ) : null}
-            <Fact label="Revision">{formatNumber(modlog.revision)}</Fact>
-            <Fact label="Record ID">
+            <Fact icon={IconRevision} label="Revision">
+              {formatNumber(modlog.revision)}
+            </Fact>
+            <Fact icon={IconTicket} label="Record ID">
               <span className="select-all font-mono text-xs">{modlog.id}</span>
             </Fact>
-            <Fact label="Subject">
-              <Link
-                href={`/roblox-modlogs/${robloxId}`}
-                className="font-mono text-xs text-accent hover:underline"
-              >
+            <Fact icon={IconAccounts} label="Subject">
+              <Link href={`/roblox-modlogs/${robloxId}`} className="link font-mono text-xs">
                 {robloxId}
               </Link>
             </Fact>
             {modlog.images?.length ? (
-              <Fact label="Evidence">
-                {modlog.images.length} image
-                {modlog.images.length === 1 ? "" : "s"} ·{" "}
+              <Fact icon={IconImage} label="Evidence">
+                {modlog.images.length} ·{" "}
                 {formatBytes(modlog.images.reduce((sum, img) => sum + img.bytes, 0))}
               </Fact>
             ) : null}
@@ -236,11 +249,31 @@ export default async function ModlogPage({ params }: Props) {
   );
 }
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * One provenance fact.
+ *
+ * Was a stacked label-above-value pair; eleven of those turned the sidebar
+ * into a column of uppercase headings taller than the record it described.
+ * The glyph now leads a single line, with the label in the tooltip and in the
+ * `dt` for assistive tech — the definition list stays semantically intact,
+ * the heading text just stops being drawn.
+ */
+function Fact({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: (p: { className?: string }) => React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="px-4 py-2.5">
-      <dt className="text-2xs uppercase tracking-wide text-faint">{label}</dt>
-      <dd className="mt-0.5 text-[0.8125rem] text-fg">{children}</dd>
+    <div className="flex items-baseline gap-2.5 px-4 py-2" title={label}>
+      <dt className="shrink-0 text-faint">
+        <Icon className="icon" />
+        <span className="sr-only">{label}</span>
+      </dt>
+      <dd className="min-w-0 text-[0.8125rem] text-fg">{children}</dd>
     </div>
   );
 }

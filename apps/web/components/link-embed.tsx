@@ -1,5 +1,15 @@
 import type { LinkEmbed as LinkEmbedData } from "@/lib/api";
 import { prettyUrl } from "@/lib/format";
+import {
+  IconAccounts,
+  IconCube,
+  IconExternal,
+  IconGame,
+  IconImage,
+  IconPlay,
+  IconThread,
+  IconUser,
+} from "./icons";
 
 /**
  * Link embeds.
@@ -11,25 +21,25 @@ import { prettyUrl } from "@/lib/format";
  * and the viewer's browser never pings the linked host.
  */
 
+const KIND_ICON: Record<string, (p: { className?: string }) => React.ReactNode> = {
+  youtube: IconPlay,
+  video: IconPlay,
+  image: IconImage,
+  discord: IconThread,
+  roblox_user: IconUser,
+  roblox_group: IconAccounts,
+  roblox_game: IconGame,
+  roblox_asset: IconCube,
+};
+
 function KindIcon({ kind }: { kind: string }) {
-  const glyph =
-    kind === "youtube" || kind === "video"
-      ? "▶"
-      : kind === "twitter"
-        ? "𝕏"
-        : kind === "discord"
-          ? "◇"
-          : kind.startsWith("roblox")
-            ? "◈"
-            : kind === "image"
-              ? "▣"
-              : "↗";
+  const Icon = KIND_ICON[kind] ?? IconExternal;
   return (
     <span
       aria-hidden
-      className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-bg text-xs text-muted"
+      className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-bg text-muted"
     >
-      {glyph}
+      <Icon className="icon" />
     </span>
   );
 }
@@ -70,7 +80,7 @@ export function LinkEmbedCard({ link }: { link: LinkEmbedData }) {
           ) : null}
         </div>
 
-        <p className="mt-0.5 truncate text-sm font-medium text-fg group-hover:text-accent">
+        <p className="mt-0.5 truncate text-sm link-block font-medium text-fg">
           {link.title ?? prettyUrl(link.url)}
         </p>
 

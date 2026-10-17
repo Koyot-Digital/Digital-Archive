@@ -77,7 +77,7 @@ export default async function HomePage() {
                 href={`/modlogs?action=${action}`}
                 className="group inline-flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm transition-colors hover:border-line-strong hover:bg-raised"
               >
-                <span className="text-fg group-hover:text-accent">
+                <span className="link-block text-fg">
                   {ACTION_LABELS[action as ModlogAction] ?? action}
                 </span>
                 <span className="font-mono text-2xs tabular-nums text-faint">
@@ -94,7 +94,7 @@ export default async function HomePage() {
           <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">
             Recently archived
           </h2>
-          <Link href="/modlogs" className="text-xs text-accent hover:underline">
+          <Link href="/modlogs" className="link text-xs">
             View all →
           </Link>
         </div>

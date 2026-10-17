@@ -6,7 +6,8 @@
     "dev": "node --env-file-if-exists=../../.env scripts/dev.mjs",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "typecheck": "tsc --noEmit && node scripts/check-contrast.mjs",
     "lint": "next lint"
   },
   "dependencies": {

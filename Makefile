@@ -28,6 +28,17 @@ migrate: ## Apply pending SQL migrations
 seed: ## Insert sample records (refuses to run in production)
 	pnpm seed
 
+.PHONY: import
+import: ## Load a Discord forum scrape: make import FILE=scrape.jsonl [IMAGES=1] [DRY=1]
+	@test -n "$(FILE)" || { echo "usage: make import FILE=path/to/scrape.jsonl [IMAGES=1] [DRY=1]"; exit 1; }
+	@# The script runs with apps/api as its cwd, so a relative FILE has to be
+	@# resolved here rather than passed through as-is.
+	pnpm import:forum "$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")" \
+	  $(if $(CONFLICT),--conflict $(CONFLICT),) \
+	  $(if $(LIMIT),--limit $(LIMIT),) \
+	  $(if $(IMAGES),--images,) \
+	  $(if $(DRY),--dry-run,)
+
 .PHONY: apikey
 apikey: ## Mint a scraper key: make apikey NAME="nightly" SCOPES=ingress:write
 	pnpm apikey "$(NAME)" "$(SCOPES)"

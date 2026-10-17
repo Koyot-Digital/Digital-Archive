@@ -3,29 +3,48 @@
 @tailwind utilities;
 
 /*
- * Palette.
+ * Palette — neutral greyscale, no hue anywhere.
  *
- * Dark by default — an archive is a tool, and tools get stared at for a long
- * time. Light theme is available via [data-theme="light"] and follows the OS
- * preference unless the viewer has pinned one.
+ * Dark by default: an archive is a tool, and tools get stared at for a long
+ * time. Light theme follows the OS preference unless the viewer pins one.
+ *
+ * Every value is a true grey (R = G = B). That is a constraint with
+ * consequences, and the rest of this file answers them:
+ *
+ *   * Severity cannot be a hue scale, so it is a *value* ramp — each step
+ *     further from the background than the last — and it is always drawn with
+ *     the stepped meter glyph in components/icons.tsx, so the rank survives
+ *     for anyone who cannot separate two adjacent greys. Colour is never the
+ *     only carrier.
+ *   * `--accent` is the strongest ink rather than a separate colour, so it
+ *     cannot distinguish a link from body text. Links therefore carry a
+ *     permanent underline (.link below) instead of relying on tint.
  */
 :root {
-  --bg: 8 9 11;
-  --surface: 14 15 18;
-  --raised: 20 21 25;
-  --line: 33 35 41;
-  --line-strong: 48 51 59;
-  --fg: 237 238 242;
-  --muted: 150 154 165;
-  --faint: 104 108 120;
-  --accent: 94 129 244;
-  --accent-fg: 255 255 255;
+  --bg: 9 9 9;
+  --surface: 15 15 15;
+  --raised: 22 22 22;
+  --line: 37 37 37;
+  --line-strong: 54 54 54;
+  /*
+   * Three text tiers, each clearing 4.5:1 against both --bg and --surface.
+   * --faint used to sit near 4:1, which was tolerable while it only carried
+   * bullet-separated words; now that it carries 12px icons and bare counts,
+   * it has to be legible on its own.
+   */
+  --fg: 240 240 240;
+  --muted: 176 176 176;
+  --faint: 126 126 126;
+  /* The strongest ink available, used for solid controls and selected state. */
+  --accent: 240 240 240;
+  --accent-fg: 12 12 12;
 
-  --sev-info: 125 131 145;
-  --sev-low: 86 160 221;
-  --sev-medium: 219 167 76;
-  --sev-high: 226 122 63;
-  --sev-critical: 226 78 78;
+  /* Ascending contrast against the background: info recedes, critical shouts. */
+  --sev-info: 126 126 126;
+  --sev-low: 152 152 152;
+  --sev-medium: 180 180 180;
+  --sev-high: 212 212 212;
+  --sev-critical: 246 246 246;
 
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;
@@ -35,42 +54,44 @@
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: 252 252 253;
+    --bg: 252 252 252;
     --surface: 255 255 255;
-    --raised: 247 248 250;
-    --line: 227 229 234;
-    --line-strong: 206 209 217;
-    --fg: 24 26 31;
-    --muted: 94 99 110;
-    --faint: 136 141 153;
-    --accent: 60 92 214;
+    --raised: 246 246 246;
+    --line: 228 228 228;
+    --line-strong: 206 206 206;
+    --fg: 26 26 26;
+    --muted: 90 90 90;
+    --faint: 116 116 116;
+    --accent: 26 26 26;
     --accent-fg: 255 255 255;
 
-    --sev-info: 120 126 140;
-    --sev-low: 42 112 176;
-    --sev-medium: 171 119 20;
-    --sev-high: 181 85 25;
-    --sev-critical: 190 44 44;
+    /* Inverted direction, same idea: critical is the darkest mark on a page. */
+    --sev-info: 146 146 146;
+    --sev-low: 118 118 118;
+    --sev-medium: 88 88 88;
+    --sev-high: 55 55 55;
+    --sev-critical: 18 18 18;
 
     color-scheme: light;
   }
 }
 
 :root[data-theme="light"] {
-  --bg: 252 252 253;
+  --bg: 252 252 252;
   --surface: 255 255 255;
-  --raised: 247 248 250;
-  --line: 227 229 234;
-  --line-strong: 206 209 217;
-  --fg: 24 26 31;
-  --muted: 94 99 110;
-  --faint: 136 141 153;
-  --accent: 60 92 214;
-  --sev-info: 120 126 140;
-  --sev-low: 42 112 176;
-  --sev-medium: 171 119 20;
-  --sev-high: 181 85 25;
-  --sev-critical: 190 44 44;
+  --raised: 246 246 246;
+  --line: 228 228 228;
+  --line-strong: 206 206 206;
+  --fg: 26 26 26;
+  --muted: 90 90 90;
+  --faint: 116 116 116;
+  --accent: 26 26 26;
+  --accent-fg: 255 255 255;
+  --sev-info: 146 146 146;
+  --sev-low: 118 118 118;
+  --sev-medium: 88 88 88;
+  --sev-high: 55 55 55;
+  --sev-critical: 18 18 18;
   color-scheme: light;
 }
 
@@ -218,6 +239,61 @@
 
   .chip {
     @apply inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2 py-0.5 text-2xs font-medium text-muted;
+  }
+
+  /*
+   * Inline links.
+   *
+   * With no hue to spend, a link cannot be "the blue text" — so it is the
+   * underlined text, permanently. The underline starts quiet and firms up on
+   * hover, which keeps a paragraph readable while still being unmistakably
+   * clickable at rest. Never swap this for a colour-only treatment.
+   */
+  .link {
+    @apply text-fg underline decoration-line-strong decoration-1 underline-offset-2 transition-colors hover:decoration-fg;
+  }
+
+  /*
+   * A row or card that is itself a link. The title has no underline at rest
+   * because the whole row is the target and the hit area makes that obvious;
+   * hover confirms it.
+   */
+  .link-block {
+    @apply underline decoration-transparent decoration-1 underline-offset-2 transition-colors;
+  }
+  .group:hover .link-block {
+    @apply decoration-line-strong;
+  }
+
+  /*
+   * Icon sizes.
+   *
+   * Two steps, and everything in components/icons.tsx goes through one of
+   * them — so this is the only place site-wide icon sizing is decided.
+   *
+   * `--icon` (18px) is the default: section headings, the provenance
+   * sidebar, link-embed cards, pagination chevrons. `--icon-sm` (15px) is for
+   * icons sitting inline beside 11px `text-2xs` metadata, where the larger
+   * step would out-weigh the number it annotates.
+   *
+   * The negative `align` optically centres an icon that is taller than the
+   * cap height of the text beside it. It only applies to icons in raw text
+   * flow; most sit inside an `inline-flex items-center` wrapper (`.meta`, the
+   * headings), where flex alignment governs and this is inert.
+   */
+  .icon {
+    @apply inline-block h-[1.125rem] w-[1.125rem] shrink-0 align-[-0.25em];
+  }
+  .icon-sm {
+    @apply inline-block h-[0.9375rem] w-[0.9375rem] shrink-0 align-[-0.1875em];
+  }
+
+  /*
+   * Icon + value, the unit most metadata is built from: a glyph carrying the
+   * meaning and a number carrying the data, with the words in a tooltip.
+   */
+  .meta {
+    @apply inline-flex items-center gap-1 whitespace-nowrap text-2xs text-faint;
   }
 
   .skeleton {

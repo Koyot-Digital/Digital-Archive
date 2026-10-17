@@ -1,6 +1,15 @@
 import type { Thread } from "@/lib/api";
-import { cx, formatDateTime, formatNumber } from "@/lib/format";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import { DiscordAvatar, DiscordChip } from "./discord-identity";
+import {
+  IconArchived,
+  IconAttachment,
+  IconAuthor,
+  IconExternal,
+  IconLock,
+  IconReply,
+  IconThread,
+} from "./icons";
 
 /**
  * The discussion behind a record.
@@ -21,40 +30,48 @@ export function ThreadPanel({ thread }: { thread: Thread | null | undefined }) {
   const { messages, participants } = thread;
   // A thread with no surviving replies still has provenance worth showing.
   const hasDiscussion = messages.length > 0;
+  const partial = thread.replyCount > messages.length;
 
   return (
     <section className="mt-10">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">
-            Source discussion
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            {hasDiscussion ? (
-              <>
-                {formatNumber(messages.length)}{" "}
-                {messages.length === 1 ? "reply" : "replies"} archived
-                {thread.replyCount > messages.length ? (
-                  <> of {formatNumber(thread.replyCount)} on the thread</>
-                ) : null}
-              </>
-            ) : (
-              "No replies were archived for this thread."
-            )}
-          </p>
-        </div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint">
+          <IconThread className="icon" />
+          Source discussion
+          {hasDiscussion ? (
+            <span
+              className="font-normal normal-case tracking-normal text-muted"
+              // The distinction matters: a thread can have had replies deleted
+              // upstream, or carry messages the scraper chose not to keep.
+              title={
+                partial
+                  ? `${messages.length} of ${thread.replyCount} replies archived`
+                  : `${messages.length} replies archived`
+              }
+            >
+              {formatNumber(messages.length)}
+              {partial ? `/${formatNumber(thread.replyCount)}` : ""}
+            </span>
+          ) : null}
+        </h2>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {thread.locked ? <ThreadFlag>Locked</ThreadFlag> : null}
-          {thread.archived ? <ThreadFlag>Archived</ThreadFlag> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {thread.locked ? (
+            <ThreadFlag icon={IconLock} label="Thread locked — no further replies accepted" />
+          ) : null}
+          {thread.archived ? (
+            <ThreadFlag icon={IconArchived} label="Thread archived on Discord" />
+          ) : null}
           {thread.url ? (
             <a
               href={thread.url}
               target="_blank"
               rel="noopener noreferrer nofollow"
               className="btn btn-outline"
+              title="Open the original thread on Discord"
             >
-              Open in Discord ↗
+              Discord
+              <IconExternal className="icon-sm" />
             </a>
           ) : null}
         </div>
@@ -64,72 +81,106 @@ export function ThreadPanel({ thread }: { thread: Thread | null | undefined }) {
 
       {hasDiscussion ? (
         <ol className="card divide-y divide-line">
-          {messages.map((message) => (
-            <li key={message.messageId} className="flex gap-3 p-4">
-              {message.author ? (
-                <DiscordAvatar user={message.author} size="md" />
-              ) : (
-                <span
-                  title="The account that wrote this reply is no longer known"
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-raised text-2xs text-faint"
-                >
-                  ?
-                </span>
-              )}
-
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="text-sm font-medium text-fg">
-                    {message.author?.displayName ??
-                      message.author?.username ??
-                      "Unknown account"}
-                  </span>
-                  {message.author && message.author.id === thread.author?.id ? (
-                    <span className="rounded bg-accent/15 px-1 text-2xs font-semibold uppercase tracking-wide text-accent">
-                      filed this
-                    </span>
-                  ) : null}
-                  <span className="text-xs text-faint">{formatDateTime(message.postedAt)}</span>
-                  {message.editedAt ? (
-                    <span className="text-xs text-faint" title={formatDateTime(message.editedAt)}>
-                      (edited)
-                    </span>
-                  ) : null}
-                </div>
-
-                {message.html ? (
-                  <div
-                    className="prose-archive prose-archive-tight mt-1.5"
-                    // Sanitised server-side before it was ever stored.
-                    dangerouslySetInnerHTML={{ __html: message.html }}
-                  />
+          {messages.map((message) => {
+            const isFiler = Boolean(message.author && message.author.id === thread.author?.id);
+            return (
+              <li key={message.messageId} className="flex gap-3 p-4">
+                {message.author ? (
+                  <DiscordAvatar user={message.author} size="md" />
                 ) : (
-                  <p className="mt-1.5 text-sm italic text-faint">
-                    {message.imageCount
-                      ? "Attachment only — see the evidence above."
-                      : "No text content."}
-                  </p>
+                  <span
+                    title="The account that wrote this reply is no longer known"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-raised text-2xs text-faint"
+                  >
+                    ?
+                  </span>
                 )}
 
-                {message.imageCount ? (
-                  <p className="mt-1.5 text-2xs text-faint">
-                    {message.imageCount} attachment
-                    {message.imageCount === 1 ? "" : "s"} — included in the evidence above
-                  </p>
-                ) : null}
-              </div>
-            </li>
-          ))}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="text-sm font-medium text-fg">
+                      {message.author?.displayName ??
+                        message.author?.username ??
+                        "Unknown account"}
+                    </span>
+                    {isFiler ? (
+                      <span
+                        className="text-muted"
+                        title="Filed this record"
+                        role="img"
+                        aria-label="Filed this record"
+                      >
+                        <IconAuthor className="icon-sm" />
+                      </span>
+                    ) : null}
+                    <span className="text-xs text-faint">{formatDateTime(message.postedAt)}</span>
+                    {message.editedAt ? (
+                      <span className="text-xs text-faint" title={formatDateTime(message.editedAt)}>
+                        (edited)
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {message.html ? (
+                    <div
+                      className="prose-archive prose-archive-tight mt-1.5"
+                      // Sanitised server-side before it was ever stored.
+                      dangerouslySetInnerHTML={{ __html: message.html }}
+                    />
+                  ) : null}
+
+                  {/* Attachments live in the record's evidence gallery above,
+                      so this is a pointer rather than a second gallery. */}
+                  {message.imageCount ? (
+                    <span
+                      className="meta mt-1.5"
+                      title={`${message.imageCount} attachment${
+                        message.imageCount === 1 ? "" : "s"
+                      } — shown in the evidence above`}
+                    >
+                      <IconAttachment className="icon-sm" />
+                      <span aria-hidden>{message.imageCount}</span>
+                      <span className="sr-only">
+                        {message.imageCount} attachment
+                        {message.imageCount === 1 ? "" : "s"}, shown in the evidence above
+                      </span>
+                    </span>
+                  ) : null}
+
+                  {!message.html && !message.imageCount ? (
+                    <p className="mt-1.5 text-sm italic text-faint">No content.</p>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ol>
       ) : null}
     </section>
   );
 }
 
-function ThreadFlag({ children }: { children: React.ReactNode }) {
+/**
+ * Icon-only thread state. The word lives in the tooltip and the a11y name.
+ *
+ * A 2rem square, matching `.btn`'s height, so the lock and archive flags line
+ * up with the Discord button they sit beside.
+ */
+function ThreadFlag({
+  icon: Icon,
+  label,
+}: {
+  icon: (p: { className?: string }) => React.ReactNode;
+  label: string;
+}) {
   return (
-    <span className="inline-flex items-center rounded-md border border-line bg-raised px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-muted">
-      {children}
+    <span
+      className="grid h-8 w-8 place-items-center rounded-md border border-line bg-raised text-muted"
+      title={label}
+      role="img"
+      aria-label={label}
+    >
+      <Icon className="icon" />
     </span>
   );
 }
@@ -143,13 +194,27 @@ function Participants({ thread }: { thread: Thread }) {
           key={participant.id}
           user={participant}
           subtitle={
-            <span className={cx(participant.role === "author" && "text-accent")}>
-              {participant.role === "author"
-                ? "filed the record"
-                : `${formatNumber(participant.messageCount)} ${
-                    participant.messageCount === 1 ? "reply" : "replies"
-                  }`}
-            </span>
+            participant.role === "author" ? (
+              <span className="meta" title="Filed this record">
+                <IconAuthor className="icon-sm" />
+                <span className="sr-only">Filed this record</span>
+                <span aria-hidden>filed</span>
+              </span>
+            ) : (
+              <span
+                className="meta"
+                title={`${formatNumber(participant.messageCount)} ${
+                  participant.messageCount === 1 ? "reply" : "replies"
+                }`}
+              >
+                <IconReply className="icon-sm" />
+                <span aria-hidden>{formatNumber(participant.messageCount)}</span>
+                <span className="sr-only">
+                  {formatNumber(participant.messageCount)}{" "}
+                  {participant.messageCount === 1 ? "reply" : "replies"}
+                </span>
+              </span>
+            )
           }
         />
       ))}

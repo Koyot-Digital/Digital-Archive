@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cx, formatNumber } from "@/lib/format";
+import { IconChevronLeft, IconChevronRight } from "./icons";
 
 /**
  * Server-rendered pagination.
@@ -53,9 +54,18 @@ export function Pagination({
       </p>
 
       <div className="flex items-center gap-1">
+        {/* Icon-only, with the word in the accessible name: the numbered
+            links beside it already say what this does, and on a phone the
+            two words were most of the row. */}
         {page > 1 ? (
-          <Link href={href(page - 1)} className="btn btn-outline" rel="prev">
-            Previous
+          <Link
+            href={href(page - 1)}
+            className="btn btn-outline w-8 px-0"
+            rel="prev"
+            title="Previous page"
+            aria-label="Previous page"
+          >
+            <IconChevronLeft className="icon" />
           </Link>
         ) : null}
 
@@ -84,8 +94,14 @@ export function Pagination({
         </div>
 
         {page < pages ? (
-          <Link href={href(page + 1)} className="btn btn-outline" rel="next">
-            Next
+          <Link
+            href={href(page + 1)}
+            className="btn btn-outline w-8 px-0"
+            rel="next"
+            title="Next page"
+            aria-label="Next page"
+          >
+            <IconChevronRight className="icon" />
           </Link>
         ) : null}
       </div>

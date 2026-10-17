@@ -116,7 +116,7 @@ export default async function ModerationPage({ searchParams }: Props) {
             Audit trail
           </h2>
           {actionFilter ? (
-            <Link href="/moderation" className="text-xs text-accent hover:underline">
+            <Link href="/moderation" className="link text-xs">
               Clear filter ({actionFilter})
             </Link>
           ) : null}
@@ -161,7 +161,7 @@ export default async function ModerationPage({ searchParams }: Props) {
                           entry.targetType === "modlog" ? (
                             <Link
                               href={`/modlogs/${entry.targetId}`}
-                              className="text-accent hover:underline"
+                              className="link"
                             >
                               {entry.targetId}
                             </Link>

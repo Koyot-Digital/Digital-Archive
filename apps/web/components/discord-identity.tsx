@@ -1,5 +1,6 @@
 import type { DiscordIdentity } from "@/lib/api";
 import { cx } from "@/lib/format";
+import { IconBot, IconUnverified } from "./icons";
 
 /**
  * Discord identities in the archive.
@@ -23,6 +24,15 @@ const SIZES = {
 
 export type AvatarSize = keyof typeof SIZES;
 
+/**
+ * An avatar on its own is decorative.
+ *
+ * Every place the archive draws one, the account's name is already next to it
+ * in text, so the image carries no information a reader would otherwise miss:
+ * `alt=""` and no screen-reader label, or assistive tech announces the same
+ * name twice in a row. The bot marker is the exception — it is a fact about
+ * the account that appears nowhere else, so it gets read out.
+ */
 export function DiscordAvatar({
   user,
   size = "md",
@@ -31,7 +41,6 @@ export function DiscordAvatar({
   size?: AvatarSize;
 }) {
   const { px, cls, text } = SIZES[size];
-  const name = user.displayName ?? user.username ?? user.id;
 
   return (
     <span className={cx("relative inline-block shrink-0", cls)}>
@@ -48,15 +57,18 @@ export function DiscordAvatar({
       {user.bot ? (
         <span
           title="Bot account"
+          role="img"
+          aria-label="Bot account"
           className={cx(
-            "absolute -bottom-0.5 -right-0.5 grid place-items-center rounded-full bg-accent px-1 font-bold text-accent-fg",
+            "absolute -bottom-1 -right-1 grid place-items-center rounded-full border border-bg bg-accent p-[1.5px] text-accent-fg",
             text,
           )}
         >
-          B
+          {/* Overlays the avatar, so it stays a step below `.icon-sm`: any
+              larger and it covers the face it is annotating. */}
+          <IconBot className="h-3 w-3" strokeWidth={2.5} />
         </span>
       ) : null}
-      <span className="sr-only">{name}</span>
     </span>
   );
 }
@@ -92,18 +104,19 @@ export function DiscordChip({
 /**
  * Marks an identity that has never been confirmed against Discord.
  *
- * Deliberately quiet — a dotted underline and a tooltip. It matters for
- * provenance but it is not a warning: the scraped name was accurate when it
- * was captured, and that is most of what an archive promises.
+ * A dashed shield, repeated next to every one of these names — so it has to
+ * be small. It matters for provenance but it is not a warning: the scraped
+ * name was accurate when it was captured, and that is most of what an archive
+ * promises. The sentence it replaces is in the tooltip and the accessible
+ * name, and the /moderators page states it once in full for the whole set.
  */
 export function StalenessMark({ user }: { user: DiscordIdentity }) {
   if (user.resolvedFrom === "discord_api") return null;
+  const label =
+    "Name and avatar as captured when this thread was scraped; not yet confirmed against Discord";
   return (
-    <span
-      title="Name and avatar as captured when this thread was scraped; not yet confirmed against Discord"
-      className="cursor-help text-2xs text-faint underline decoration-dotted underline-offset-2"
-    >
-      as scraped
+    <span className="cursor-help text-faint" title={label} role="img" aria-label={label}>
+      <IconUnverified className="icon-sm" />
     </span>
   );
 }
