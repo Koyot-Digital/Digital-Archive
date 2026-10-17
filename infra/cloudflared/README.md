@@ -4,16 +4,29 @@ Two tunnels, one per zone. Each gets its own token and its own cloudflared
 container, so the web UI and the API have separate ingress paths and separate
 failure domains.
 
-| Tunnel         | Zone          | Public hostname        | Path                                  | Origin              |
-| -------------- | ------------- | ---------------------- | ------------------------------------- | ------------------- |
-| `archive-web`  | `chrisrelf.cc`| `archive.chrisrelf.cc` | *(none - all paths)*                  | `http://caddy:8080` |
-| `archive-api`  | `relf.cc`     | `api.relf.cc`          | `^/?digitalarchive/v1/images(/.*)?$`  | `http://caddy:8082` |
-| `archive-api`  | `relf.cc`     | `api.relf.cc`          | *(none - all paths)*                  | `http://caddy:8081` |
+| Tunnel        | Zone           | Public hostname        | Path                                 | Origin              |
+| ------------- | -------------- | ---------------------- | ------------------------------------ | ------------------- |
+| `archive-web` | `chrisrelf.cc` | `archive.chrisrelf.cc` | *(none - all paths)*                 | `http://caddy:8080` |
+| `archive-web` | `chrisrelf.cc` | `api.chrisrelf.cc`     | `^/?digitalarchive/v1/images(/.*)?$` | `http://caddy:8082` |
+| `archive-web` | `chrisrelf.cc` | `api.chrisrelf.cc`     | *(none - all paths)*                 | `http://caddy:8081` |
+| `archive-api` | `relf.cc`      | `api.relf.cc`          | `^/?digitalarchive/v1/images(/.*)?$` | `http://caddy:8082` |
+| `archive-api` | `relf.cc`      | `api.relf.cc`          | *(none - all paths)*                 | `http://caddy:8081` |
 
-Note the last two rows: **both are on the same tunnel.** A public hostname is a
-CNAME to one tunnel's `<uuid>.cfargotunnel.com`, and a DNS name holds exactly
-one CNAME - so one hostname cannot be split across two tunnels. The text and
-images listeners are split by a path rule *within* the api tunnel instead.
+**Why the API appears twice, on two domains.** `api.chrisrelf.cc` is the host
+browsers are sent to, and it has to sit under `ROOT_DOMAIN` because that is
+what scopes the session and OAuth-state cookies: a browser discards a
+`Set-Cookie` whose `Domain` is not a suffix of the responding host, so an API
+on an unrelated domain cannot sign anyone in - it fails with "OAuth state
+mismatch" before the session is ever created.
+
+`api.relf.cc` stays as the machine-facing endpoint for scrapers and uploads.
+Those authenticate with an API key and never read a cookie, so a second domain
+costs them nothing. Both map to the same two Caddy listeners.
+
+**Rows sharing a hostname share a tunnel.** A public hostname is a CNAME to one
+tunnel's `<uuid>.cfargotunnel.com`, and a DNS name holds exactly one CNAME, so
+one hostname cannot be split across two tunnels. The text/images split is a
+path rule *within* a tunnel.
 
 ## Setting them up (dashboard)
 
@@ -27,7 +40,7 @@ For each tunnel, in **Zero Trust → Networks → Tunnels**:
    network, and the origin leg has no TLS at all - so leave `No TLS Verify`
    off under **Additional application settings → HTTP Settings**).
 
-For `archive-api`, **add the images row first.** Rules are evaluated top to
+Wherever a hostname has two rows, **add the images row first.** Rules are evaluated top to
 bottom, so a catch-all sitting above the images rule swallows every image
 request and sends it to the text listener, whose body limit is 2MB rather than
 32MB - large uploads would fail with a 413 and nothing in the API logs.
@@ -62,10 +75,10 @@ plain `make up`, which is what you want while developing locally.
 The origin already sends correct `Cache-Control`, so the useful thing to add
 at the edge is a cache rule that lets Cloudflare honour it:
 
-- **`api.relf.cc/digitalarchive/v1/images/*`** - Cache Level: Cache
+- **`api.chrisrelf.cc/digitalarchive/v1/images/*`** - Cache Level: Cache
   Everything, Edge TTL: *Respect origin*. Image bytes are immutable per id, so
   this is where almost all of the traffic should stop.
-- **`api.relf.cc/digitalarchive/v1/*`** - Cache Level: Standard, and
+- **`api.chrisrelf.cc/digitalarchive/v1/*`** - Cache Level: Standard, and
   **bypass cache on cookie** `archive_session`. Archive reads vary by role;
   the origin sets `Vary: Cookie` and `private` for moderators, but an explicit
   bypass rule means a misconfiguration cannot leak a hidden record into a
