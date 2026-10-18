@@ -9,10 +9,6 @@ import { IconExternal } from "./icons";
 
 /** Top bar. Sticky, hairline-bordered, deliberately quiet. */
 export function Header({ viewer }: { viewer: Viewer }) {
-  const role = viewer.user?.role;
-  const isStaff = role === "moderator" || role === "admin";
-  const isAdmin = role === "admin";
-
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-content items-center gap-3 px-4 sm:px-6">
@@ -26,13 +22,16 @@ export function Header({ viewer }: { viewer: Viewer }) {
           <span className="hidden text-sm font-semibold tracking-tight sm:inline">{SITE_NAME}</span>
         </Link>
 
+        {/*
+          Two tabs only: the archive is browsed by account or by record, and
+          everything else - who files records, the API, the staff tools - is a
+          destination you go to deliberately rather than one you navigate
+          between. Those live in the footer, which has the side benefit of
+          being reachable on a phone, where this nav is hidden entirely.
+        */}
         <nav className="hidden items-center gap-1 md:flex">
           <NavLink href="/subjects">Subjects</NavLink>
           <NavLink href="/modlogs">All records</NavLink>
-          <NavLink href="/moderators">Moderators</NavLink>
-          {isStaff ? <NavLink href="/moderation">Moderation</NavLink> : null}
-          {isAdmin ? <NavLink href="/ingest">Ingest</NavLink> : null}
-          <NavLink href="/about">About</NavLink>
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
@@ -98,24 +97,47 @@ function ViewerChip({ viewer }: { viewer: Viewer }) {
   );
 }
 
-export function Footer() {
+function FooterLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="transition-colors hover:text-fg">
+      {children}
+    </Link>
+  );
+}
+
+export function Footer({ viewer }: { viewer: Viewer }) {
+  const role = viewer.user?.role;
+  const isStaff = role === "moderator" || role === "admin";
+  const isAdmin = role === "admin";
+
   return (
     <footer className="mt-20 border-t border-line">
-      <div className="mx-auto flex max-w-content flex-col gap-3 px-4 py-8 text-xs text-faint sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <p>
+      <div className="mx-auto flex max-w-content flex-col gap-4 px-4 py-8 text-xs text-faint sm:flex-row sm:items-start sm:justify-between sm:gap-8 sm:px-6">
+        <p className="max-w-prose">
           {SITE_NAME} - a moderation-record archive. Every record carries its source and its full
           edit history.
         </p>
-        <nav className="flex gap-4">
-          <Link href="/about" className="hover:text-fg">
-            About
-          </Link>
-          <Link href="/about#corrections" className="hover:text-fg">
-            Corrections
-          </Link>
-          <Link href="/api-docs" className="hover:text-fg">
-            API
-          </Link>
+
+        <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:justify-end">
+          {/* Mirrors the header on a phone, where that nav is hidden. */}
+          <span className="flex gap-x-4 md:hidden">
+            <FooterLink href="/subjects">Subjects</FooterLink>
+            <FooterLink href="/modlogs">All records</FooterLink>
+          </span>
+          <FooterLink href="/moderators">Moderators</FooterLink>
+          <FooterLink href="/about">About</FooterLink>
+          <FooterLink href="/about#corrections">Corrections</FooterLink>
+          <FooterLink href="/api-docs">API</FooterLink>
+
+          {isStaff ? (
+            <>
+              <span aria-hidden className="text-line-strong">
+                /
+              </span>
+              <FooterLink href="/moderation">Moderation</FooterLink>
+            </>
+          ) : null}
+          {isAdmin ? <FooterLink href="/ingest">Ingest</FooterLink> : null}
         </nav>
       </div>
     </footer>

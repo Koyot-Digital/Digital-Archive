@@ -78,7 +78,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           {children}
         </main>
 
-        <Footer />
+        <Footer viewer={viewer} />
       </body>
     </html>
   );
