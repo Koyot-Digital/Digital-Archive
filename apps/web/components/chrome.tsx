@@ -11,6 +11,7 @@ import { IconExternal } from "./icons";
 export function Header({ viewer }: { viewer: Viewer }) {
   const role = viewer.user?.role;
   const isStaff = role === "moderator" || role === "admin";
+  const isAdmin = role === "admin";
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/85 backdrop-blur-md">
@@ -30,6 +31,7 @@ export function Header({ viewer }: { viewer: Viewer }) {
           <NavLink href="/modlogs">All records</NavLink>
           <NavLink href="/moderators">Moderators</NavLink>
           {isStaff ? <NavLink href="/moderation">Moderation</NavLink> : null}
+          {isAdmin ? <NavLink href="/ingest">Ingest</NavLink> : null}
           <NavLink href="/about">About</NavLink>
         </nav>
 

@@ -296,6 +296,13 @@ export const forumIngressBatchSchema = z.object({
   batchId: z.string().trim().min(8).max(64).optional(),
   onConflict: z.enum(["skip", "merge", "replace"]).default("merge"),
   dryRun: z.boolean().default(false),
+  /**
+   * Fetch each thread's attachments. Defaults to true because a scraper
+   * posting live threads wants the evidence; an operator re-importing an old
+   * export can turn it off, since Discord's links will have expired and every
+   * attempt costs a round trip.
+   */
+  fetchImages: z.boolean().default(true),
   posts: z.array(discordForumPostSchema).min(1).max(500),
 });
 export type ForumIngressBatch = z.infer<typeof forumIngressBatchSchema>;

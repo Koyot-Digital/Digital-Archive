@@ -17,7 +17,14 @@ import { badRequest, payloadTooLarge, unauthorized } from "../../lib/errors.js";
 import { safeEqual } from "../../lib/crypto.js";
 import { invalidate } from "../../lib/redis.js";
 import { recordAudit } from "../../services/audit.js";
-import { attachImage, attachImageFromUrl, imageStats, removeImage } from "../../services/images.js";
+import {
+  attachImage,
+  attachImageFromUrl,
+  attachmentIdentity,
+  imageStats,
+  removeImage,
+  storedAttachmentIdentities,
+} from "../../services/images.js";
 import { actorOf } from "../../auth/plugin.js";
 import { idParam } from "../helpers.js";
 
@@ -305,11 +312,28 @@ function serialise(row: ImageRow, subject?: SubjectIdentity) {
 async function fetchMany(
   input: { modlogId: string; urls: string[]; captions?: string[] | undefined },
   actor: { uploadedBy: string | null; uploadedByKey: string | null },
-): Promise<{ images: ImageRow[]; errors: { url: string; message: string }[] }> {
+): Promise<{
+  images: ImageRow[];
+  skipped: number;
+  errors: { url: string; message: string }[];
+}> {
   const stored: ImageRow[] = [];
   const errors: { url: string; message: string }[] = [];
 
+  // Attachments already on this record are not fetched again. attachImage
+  // would dedupe them on the original bytes' sha256 regardless, but only
+  // after paying for the download, and a re-ingest of the same threads is
+  // mostly attachments already held. Matching is on the URL path because
+  // Discord re-signs its links (ex/is/hm) on every scrape.
+  const held = await storedAttachmentIdentities(input.modlogId);
+  let skipped = 0;
+
   for (const [i, url] of input.urls.entries()) {
+    const identity = attachmentIdentity(url);
+    if (identity && held.has(identity)) {
+      skipped += 1;
+      continue;
+    }
     try {
       const row = await attachImageFromUrl(url, {
         modlogId: input.modlogId,
@@ -323,7 +347,7 @@ async function fetchMany(
       errors.push({ url, message: err instanceof Error ? err.message : "fetch failed" });
     }
   }
-  return { images: stored, errors };
+  return { images: stored, skipped, errors };
 }
 
 /** Exported for the id validation used by the serve route's sibling checks. */

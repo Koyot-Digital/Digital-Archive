@@ -128,6 +128,8 @@ interface PreparedBatch {
   batchId: string;
   onConflict: "skip" | "merge" | "replace";
   dryRun: boolean;
+  /** Whether to hand this batch's attachment URLs to the images service. */
+  fetchImages: boolean;
   records: IngressRecord[];
   /**
    * Inputs that never became records at all - a forum thread whose title
@@ -251,7 +253,7 @@ async function applyBatch(
         if (record.imageIds.length) {
           result.counts.imagesQueued += await adoptImages(outcome.id, record.imageIds);
         }
-        if (record.imageUrls.length) {
+        if (batch.fetchImages && record.imageUrls.length) {
           followUps.push({ modlogId: outcome.id, imageUrls: record.imageUrls });
           result.counts.imagesQueued += record.imageUrls.length;
         }
@@ -374,6 +376,9 @@ export async function ingressRoutes(app: FastifyInstance): Promise<void> {
         batchId,
         onConflict: batch.onConflict,
         dryRun: batch.dryRun,
+        // The record-level endpoint has no flag of its own; images named in a
+        // record have always been fetched and callers depend on that.
+        fetchImages: true,
         records: batch.records,
         unmapped: [],
       });
@@ -446,6 +451,7 @@ export async function ingressRoutes(app: FastifyInstance): Promise<void> {
         batchId,
         onConflict: batch.onConflict,
         dryRun: batch.dryRun,
+        fetchImages: batch.fetchImages,
         records,
         unmapped,
       });
