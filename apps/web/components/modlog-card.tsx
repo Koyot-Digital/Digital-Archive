@@ -3,7 +3,7 @@ import type { Modlog } from "@/lib/api";
 import { PLATFORM_LABELS } from "@archive/shared";
 import { formatDate, formatNumber } from "@/lib/format";
 import { ActionBadge, Meta, SeverityBadge, StatusBadge, Tag } from "./badges";
-import { IconImage, IconRevision, IconThread, IconTicket } from "./icons";
+import { IconEmpty, IconImage, IconRevision, IconThread, IconTicket } from "./icons";
 
 /**
  * One row in a list of modlogs.
@@ -131,8 +131,9 @@ export function ModlogList({
 }) {
   if (!modlogs.length) {
     return (
-      <div className="px-5 py-16 text-center">
-        <p className="text-sm text-muted">{empty}</p>
+      <div className="flex flex-col items-center px-5 py-16 text-center">
+        <IconEmpty className="h-7 w-7 text-line-strong" strokeWidth={1.4} />
+        <p className="mt-3 max-w-sm text-sm text-muted">{empty}</p>
       </div>
     );
   }

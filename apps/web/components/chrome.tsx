@@ -5,7 +5,7 @@ import { SITE_NAME, loginUrl } from "@/lib/api";
 import { cx, formatNumber } from "@/lib/format";
 import { SearchBox } from "./search-box";
 import { ThemeToggle } from "./theme-toggle";
-import { IconExternal } from "./icons";
+import { IconAccounts, IconExternal, IconRecord } from "./icons";
 
 /** Top bar. Sticky, hairline-bordered, deliberately quiet. */
 export function Header({ viewer }: { viewer: Viewer }) {
@@ -30,8 +30,14 @@ export function Header({ viewer }: { viewer: Viewer }) {
           being reachable on a phone, where this nav is hidden entirely.
         */}
         <nav className="hidden items-center gap-1 md:flex">
-          <NavLink href="/subjects">Subjects</NavLink>
-          <NavLink href="/modlogs">All records</NavLink>
+          <NavLink href="/subjects">
+            <IconAccounts className="h-3.5 w-3.5" />
+            Subjects
+          </NavLink>
+          <NavLink href="/modlogs">
+            <IconRecord className="h-3.5 w-3.5" />
+            All records
+          </NavLink>
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
@@ -61,7 +67,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   return (
     <Link
       href={href}
-      className="rounded-md px-2.5 py-1.5 text-sm text-muted transition-colors hover:bg-raised hover:text-fg"
+      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted transition-colors hover:bg-raised hover:text-fg"
     >
       {children}
     </Link>
@@ -245,11 +251,25 @@ export function SubjectHeader({ subject }: { subject: Subject }) {
   );
 }
 
-export function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+export function Stat({
+  label,
+  value,
+  hint,
+  icon,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  /** Sits beside the label, never the number - the figure stays the loudest thing here. */
+  icon?: React.ReactNode;
+}) {
   return (
     <div>
       <div className="text-xl font-semibold tabular-nums tracking-tight">{value}</div>
-      <div className="text-2xs uppercase tracking-wide text-faint">{label}</div>
+      <div className="flex items-center gap-1.5 text-2xs uppercase tracking-wide text-faint">
+        {icon}
+        {label}
+      </div>
       {hint ? <div className="mt-0.5 text-2xs text-faint">{hint}</div> : null}
     </div>
   );

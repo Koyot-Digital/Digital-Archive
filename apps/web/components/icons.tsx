@@ -351,6 +351,48 @@ export function IconCube(p: IconProps) {
   );
 }
 
+/**
+ * Discord, as a platform rather than a brand.
+ *
+ * Drawn on the same 24-unit stroked grid as everything else rather than
+ * dropped in as the official mark: a filled brand logo in a set of hairline
+ * glyphs reads as a sticker, and this archive has no hue to render it in.
+ */
+export function IconDiscord(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M8.6 5.3a13 13 0 0 1 6.8 0" />
+      <path d="M15.4 18.7a13 13 0 0 1-6.8 0" />
+      <path d="M8.6 5.3C6.2 6 4.6 7.4 4 9.6a18 18 0 0 0-.5 5.6c1.4 1.7 3.2 2.9 5.1 3.5l.9-2" />
+      <path d="M15.4 5.3c2.4.7 4 2.1 4.6 4.3a18 18 0 0 1 .5 5.6 12.6 12.6 0 0 1-5.1 3.5l-.9-2" />
+      <circle cx="9.3" cy="13" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="14.7" cy="13" r="1.3" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** A record: a filed, dated entry. */
+export function IconRecord(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5.5 3.5h9l5 5V20a.5.5 0 0 1-.5.5H5.5A.5.5 0 0 1 5 20V4a.5.5 0 0 1 .5-.5Z" />
+      <path d="M14 3.6V9h5.4" />
+      <path d="M8.5 13h7" />
+      <path d="M8.5 16.5h4.5" />
+    </Svg>
+  );
+}
+
+/** Nothing here - an empty tray, for empty states. */
+export function IconEmpty(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 13.5h4l1.2 2.4h6.6l1.2-2.4h4" />
+      <path d="M3.5 13.5 6 5.8A1.5 1.5 0 0 1 7.4 4.8h9.2a1.5 1.5 0 0 1 1.4 1L20.5 13.5V18a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18Z" />
+    </Svg>
+  );
+}
+
 /** A single account. */
 export function IconUser(p: IconProps) {
   return (
@@ -414,4 +456,23 @@ export function SeverityMeter({
       ))}
     </span>
   );
+}
+
+/* ───────────────────────────── platforms ───────────────────────────── */
+
+/**
+ * The mark for a subject's platform.
+ *
+ * Roblox borrows the asset cube, which is the shape the platform uses for
+ * itself; Discord gets the glyph above. Anything unknown renders nothing
+ * rather than a guess, because a wrong mark is worse than none.
+ */
+export function PlatformIcon({
+  platform,
+  className,
+  strokeWidth,
+}: IconProps & { platform: string }) {
+  if (platform === "roblox") return <IconCube className={className} strokeWidth={strokeWidth} />;
+  if (platform === "discord") return <IconDiscord className={className} strokeWidth={strokeWidth} />;
+  return null;
 }

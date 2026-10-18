@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { api, loginUrl } from "@/lib/api";
+import { IconDiscord } from "@/components/icons";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -44,7 +45,11 @@ export default async function LoginPage({ searchParams }: Props) {
         </p>
       ) : null}
 
-      <a href={loginUrl(returnTo)} className="btn btn-primary mt-8 w-full">
+      <a
+        href={loginUrl(returnTo)}
+        className="btn btn-primary mt-8 inline-flex w-full items-center justify-center gap-2"
+      >
+        <IconDiscord className="h-4 w-4" />
         Continue with Discord
       </a>
 

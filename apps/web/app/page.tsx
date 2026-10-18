@@ -5,6 +5,14 @@ import { formatBytes, formatNumber, formatPercent, formatRelative } from "@/lib/
 import { ModlogList } from "@/components/modlog-card";
 import { SearchBox } from "@/components/search-box";
 import { Stat } from "@/components/chrome";
+import {
+  IconAccounts,
+  IconArchiveClock,
+  IconChevronRight,
+  IconImage,
+  IconRecord,
+  PlatformIcon,
+} from "@/components/icons";
 
 export const revalidate = 60;
 
@@ -43,14 +51,23 @@ export default async function HomePage() {
       {stats ? (
         <section className="mb-10 grid gap-px overflow-hidden rounded-card border border-line bg-line sm:grid-cols-4">
           <div className="bg-surface px-4 py-4">
-            <Stat label="Subjects" value={formatNumber(stats.archive.subjects)} />
+            <Stat
+              label="Subjects"
+              value={formatNumber(stats.archive.subjects)}
+              icon={<IconAccounts className="h-3 w-3" />}
+            />
           </div>
           <div className="bg-surface px-4 py-4">
-            <Stat label="Records" value={formatNumber(stats.archive.modlogs)} />
+            <Stat
+              label="Records"
+              value={formatNumber(stats.archive.modlogs)}
+              icon={<IconRecord className="h-3 w-3" />}
+            />
           </div>
           <div className="bg-surface px-4 py-4">
             <Stat
               label="Evidence images"
+              icon={<IconImage className="h-3 w-3" />}
               value={formatNumber(stats.archive.images)}
               hint={
                 stats.images.originalBytes > 0
@@ -60,7 +77,11 @@ export default async function HomePage() {
             />
           </div>
           <div className="bg-surface px-4 py-4">
-            <Stat label="Last ingest" value={formatRelative(stats.archive.latestAt)} />
+            <Stat
+              label="Last ingest"
+              value={formatRelative(stats.archive.latestAt)}
+              icon={<IconArchiveClock className="h-3 w-3" />}
+            />
           </div>
         </section>
       ) : null}
@@ -73,8 +94,9 @@ export default async function HomePage() {
             <Link
               key={platform}
               href={`/subjects?platform=${platform}`}
-              className="card flex items-baseline gap-2 px-3.5 py-2 text-sm transition-colors hover:border-line-strong"
+              className="card flex items-center gap-2 px-3.5 py-2 text-sm transition-colors hover:border-line-strong"
             >
+              <PlatformIcon platform={platform} className="h-4 w-4 text-muted" />
               <span className="font-medium">{PLATFORM_LABELS[platform]}</span>
               <span className="tabular-nums text-muted">
                 {formatNumber(modlogs)} record{modlogs === 1 ? "" : "s"}
@@ -116,8 +138,9 @@ export default async function HomePage() {
           <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">
             Recently archived
           </h2>
-          <Link href="/modlogs" className="link text-xs">
-            View all →
+          <Link href="/modlogs" className="link inline-flex items-center gap-0.5 text-xs">
+            View all
+            <IconChevronRight className="h-3 w-3" />
           </Link>
         </div>
 

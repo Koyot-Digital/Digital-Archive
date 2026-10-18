@@ -2,6 +2,14 @@
 
 import { useRef, useState } from "react";
 import { cx } from "@/lib/format";
+import {
+  IconAccounts,
+  IconArchived,
+  IconImage,
+  IconRecord,
+  IconRevision,
+  IconUnverified,
+} from "./icons";
 
 /**
  * Upload a Discord forum scrape from the browser.
@@ -199,7 +207,7 @@ export function IngestForm({ apiBase }: { apiBase: string }) {
             )}
           />
           <p className="text-xs text-muted">
-            One JSON thread per line, as the scraper writes it - the same file{" "}
+            One JSON thread per line - the same file{" "}
             <code className="font-mono text-2xs">make ingest</code> takes.
           </p>
         </div>
@@ -224,8 +232,7 @@ export function IngestForm({ apiBase }: { apiBase: string }) {
             )}
           />
           <p className="text-xs text-muted">
-            Needs the <code className="font-mono text-2xs">ingress:write</code> scope. Kept in this
-            page only - never stored, never sent anywhere but the API.
+            Needs <code className="font-mono text-2xs">ingress:write</code>. Held in this page only.
           </p>
         </div>
 
@@ -260,7 +267,7 @@ export function IngestForm({ apiBase }: { apiBase: string }) {
               <span>
                 Fetch attachments
                 <span className="block text-xs text-muted">
-                  Discord signs its links for about a day; an old export mostly 404s.
+                  Discord links expire after about a day.
                 </span>
               </span>
             </label>
@@ -316,27 +323,33 @@ export function IngestForm({ apiBase }: { apiBase: string }) {
           <h2 className="text-sm font-semibold">
             {dryRun ? "Would import" : finished ? "Imported" : "Importing…"}
           </h2>
-          <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <dl className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3">
             {(
               [
-                ["received", "threads sent"],
-                ["created", "new records"],
-                ["updated", "updated"],
-                ["skipped", "skipped"],
-                ["failed", "not placed"],
-                ["imagesQueued", "attachments queued"],
+                ["received", "sent", IconArchived, false],
+                ["created", "new", IconRecord, false],
+                ["updated", "updated", IconRevision, false],
+                ["skipped", "skipped", IconAccounts, false],
+                ["failed", "not placed", IconUnverified, true],
+                ["imagesQueued", "attachments", IconImage, false],
               ] as const
-            ).map(([key, label]) => (
-              <div key={key}>
-                <dt className="text-xs text-muted">{label}</dt>
+            ).map(([key, label, Glyph, warn]) => (
+              <div key={key} className="flex items-baseline gap-1.5">
+                <Glyph
+                  className={cx(
+                    "h-3.5 w-3.5 shrink-0 translate-y-0.5",
+                    warn && totals.failed ? "text-sev-high" : "text-faint",
+                  )}
+                />
                 <dd
                   className={cx(
-                    "font-mono text-lg",
-                    key === "failed" && totals.failed ? "text-sev-high" : undefined,
+                    "font-mono text-base tabular-nums",
+                    warn && totals.failed ? "text-sev-high" : undefined,
                   )}
                 >
                   {totals[key]}
                 </dd>
+                <dt className="text-xs text-muted">{label}</dt>
               </div>
             ))}
           </dl>

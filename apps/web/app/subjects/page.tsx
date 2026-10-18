@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { cx, formatDate, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/chrome";
 import { Pagination } from "@/components/pagination";
+import { PlatformIcon } from "@/components/icons";
 
 export const metadata: Metadata = {
   title: "Subjects",
@@ -127,9 +128,14 @@ export default async function SubjectsPage({ searchParams }: Props) {
                         subject.username ??
                         `${PLATFORM_LABELS[subject.platform]} ${subject.externalId}`}
                     </p>
-                    <p className="truncate text-2xs text-faint">
-                      {subject.username ? `@${subject.username} · ` : ""}
-                      {PLATFORM_LABELS[subject.platform]} ·{" "}
+                    <p className="flex items-center gap-1.5 truncate text-2xs text-faint">
+                      <PlatformIcon
+                        platform={subject.platform}
+                        className="h-3 w-3 shrink-0"
+                        strokeWidth={2}
+                      />
+                      <span className="sr-only">{PLATFORM_LABELS[subject.platform]}</span>
+                      {subject.username ? <span>@{subject.username}</span> : null}
                       <span className="font-mono">{subject.externalId}</span>
                     </p>
                   </div>
