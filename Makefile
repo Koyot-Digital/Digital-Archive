@@ -80,7 +80,9 @@ ingest: ## Import a scrape via the running stack: make ingest FILE=scrape.jsonl 
 	@# Unlike `make import`, this needs no node on the host: the compiled script
 	@# already lives in the api image. The scrape is bind-mounted read-only
 	@# rather than copied, so a 2GB export costs nothing to hand over.
-	$(COMPOSE) run --rm --no-deps 	  -v "$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")":/tmp/scrape.jsonl:ro 	  api-text node dist/scripts/import-forum-scrape.js /tmp/scrape.jsonl 	  $(if $(CONFLICT),--conflict $(CONFLICT),) 	  $(if $(LIMIT),--limit $(LIMIT),) 	  $(if $(IMAGES),--images,) 	  $(if $(DRY),--dry-run,)
+	@# Runs on api-images, not api-text: IMAGES=1 writes converted WebP into
+	@# the storage volume, which api-text mounts read-only by design.
+	$(COMPOSE) run --rm --no-deps 	  -v "$$(cd "$$(dirname "$(FILE)")" && pwd)/$$(basename "$(FILE)")":/tmp/scrape.jsonl:ro 	  api-images node dist/scripts/import-forum-scrape.js /tmp/scrape.jsonl 	  $(if $(CONFLICT),--conflict $(CONFLICT),) 	  $(if $(LIMIT),--limit $(LIMIT),) 	  $(if $(IMAGES),--images,) 	  $(if $(DRY),--dry-run,)
 
 .PHONY: stack-apikey
 stack-apikey: ## Mint a key via the running stack: make stack-apikey NAME="nightly" SCOPES=ingress:write
