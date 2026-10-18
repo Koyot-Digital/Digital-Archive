@@ -221,6 +221,42 @@ export async function attachImage(input: Buffer, opts: AttachOptions): Promise<D
 }
 
 /** Download a remote image (SSRF-guarded) and attach it. */
+/**
+ * The stable identity of a remote attachment, ignoring its query string.
+ *
+ * Discord signs CDN links (`ex`, `is`, `hm`) and the signature changes on
+ * every scrape, so the full URL is useless for "do I already have this?".
+ * The path is stable, and it is identical whether the scrape captured the
+ * `cdn.discordapp.com` or the `media.discordapp.net` host for the same file,
+ * so the host is dropped too.
+ */
+export function attachmentIdentity(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).pathname || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Attachment identities already stored against a modlog, removed ones
+ * included - a moderator's takedown must not be undone by the next re-scrape.
+ */
+export async function storedAttachmentIdentities(modlogId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ sourceUrl: images.sourceUrl })
+    .from(images)
+    .where(eq(images.modlogId, modlogId));
+
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const identity = attachmentIdentity(row.sourceUrl);
+    if (identity) seen.add(identity);
+  }
+  return seen;
+}
+
 export async function attachImageFromUrl(
   url: string,
   opts: Omit<AttachOptions, "sourceUrl">,

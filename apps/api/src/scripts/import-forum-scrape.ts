@@ -13,7 +13,11 @@ import { closeDb } from "../db/client.js";
 import { closeRedis } from "../lib/redis.js";
 import { isMainModule } from "../lib/main-module.js";
 import { upsertFromIngress } from "../services/modlogs.js";
-import { attachImageFromUrl } from "../services/images.js";
+import {
+  attachImageFromUrl,
+  attachmentIdentity,
+  storedAttachmentIdentities,
+} from "../services/images.js";
 import { hasBotToken, resolveDiscordUsers } from "../services/discord-users.js";
 
 /**
@@ -248,7 +252,7 @@ async function main(): Promise<void> {
   const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
   const failures: { subject: string; message: string }[] = [];
   const touchedDiscordIds = new Set<string>();
-  const imageCounts = { attached: 0, failed: 0 };
+  const imageCounts = { attached: 0, present: 0, failed: 0 };
 
   for (const [index, record] of records.entries()) {
     try {
@@ -259,8 +263,24 @@ async function main(): Promise<void> {
       counts[outcome.outcome] += 1;
       for (const id of outcome.discordIds) touchedDiscordIds.add(id);
 
-      if (options.fetchImages && outcome.outcome !== "skipped") {
+      // Deliberately not gated on the record outcome. The conflict policy
+      // governs the record's *text*; --images governs its evidence, and a
+      // missing attachment is a gap to fill whoever owns the prose. It
+      // matters most for the case the policy skips: a moderator-edited
+      // record whose images 404'd first time round would otherwise stay
+      // unfillable forever, short of --conflict replace reverting the edit.
+      if (options.fetchImages && record.imageUrls.length) {
+        // Attachments already held are not re-fetched. attachImage dedupes
+        // them on the original bytes' sha256 regardless, but only after
+        // paying for the download - and a re-scrape is mostly images we hold.
+        const held = await storedAttachmentIdentities(outcome.id);
+
         for (const [position, url] of record.imageUrls.entries()) {
+          const identity = attachmentIdentity(url);
+          if (identity && held.has(identity)) {
+            imageCounts.present += 1;
+            continue;
+          }
           try {
             await attachImageFromUrl(url, { modlogId: outcome.id, position });
             imageCounts.attached += 1;
@@ -293,7 +313,8 @@ async function main(): Promise<void> {
 
   if (options.fetchImages) {
     console.log(
-      `\nAttachments: ${imageCounts.attached} converted, ${imageCounts.failed} unreachable` +
+      `\nAttachments: ${imageCounts.attached} converted, ` +
+        `${imageCounts.present} already held, ${imageCounts.failed} unreachable` +
         (imageCounts.failed
           ? " (Discord attachment links expire - a stale scrape mostly 404s)"
           : ""),
