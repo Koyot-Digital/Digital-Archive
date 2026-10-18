@@ -3,9 +3,15 @@ import { db } from "../db/client.js";
 import { sessions, users, type DbUser } from "../db/schema.js";
 import { config } from "../config.js";
 import { randomToken, sha256, sign, unsign } from "../lib/crypto.js";
-import { newId, type UserRole } from "@archive/shared";
+import { forbidden } from "../lib/errors.js";
+import { logger } from "../lib/logger.js";
+import { claimOnce } from "../lib/redis.js";
+import { recordAudit } from "../services/audit.js";
+import { fetchMemberRolesAsBot } from "./discord.js";
+import { NO_ROLE_MESSAGE, roleForMember } from "./roles.js";
+import { SESSION_COOKIE_NAME, newId, type UserRole } from "@archive/shared";
 
-export const SESSION_COOKIE = "archive_session";
+export const SESSION_COOKIE = SESSION_COOKIE_NAME;
 export const STATE_COOKIE = "archive_oauth_state";
 
 /** Fixed identity used while AUTH_ENABLED=false so audit rows still FK. */
@@ -94,7 +100,98 @@ export async function resolveSession(cookieValue: string | undefined): Promise<S
     .where(eq(sessions.tokenHash, hash))
     .catch(() => {});
 
-  return toSessionUser(row.user);
+  const verified = await revalidateRoles(row.user);
+  if (!verified) return null;
+
+  return toSessionUser(verified);
+}
+
+/**
+ * Re-ask the guild whether this account still has access.
+ *
+ * Returns the user with a refreshed role, or null when access has ended - in
+ * which case every session they hold is destroyed, not just the one in hand,
+ * because losing a role should not leave a second browser signed in.
+ *
+ * Three properties matter here:
+ *
+ *  1. **Throttled.** A check is due once per ROLE_RECHECK_MINUTES per
+ *     account, so the common case costs an already-loaded column and no
+ *     network call. Without it, gating every read on a role would mean a
+ *     Discord API call on every read.
+ *  2. **Single-flight.** The due check is claimed in Redis, so a page load
+ *     firing a dozen parallel requests produces one lookup rather than a
+ *     dozen. A request that loses the claim proceeds on the cached role: at
+ *     most one interval stale, which is the guarantee the interval states.
+ *  3. **Closed on "not a member", open on "Discord is unreachable".** A 404
+ *     ends the session. A timeout or a 5xx keeps the cached role and does not
+ *     advance rolesCheckedAt, so the check is retried on the next request
+ *     instead of being skipped for a whole interval. Treating an outage as
+ *     "holds no roles" would sign out every moderator the moment Discord
+ *     blipped.
+ */
+async function revalidateRoles(user: DbUser): Promise<DbUser | null> {
+  const dueAt = user.rolesCheckedAt
+    ? user.rolesCheckedAt.getTime() + config.roleRecheckSeconds * 1000
+    : 0;
+  if (Date.now() < dueAt) return user;
+
+  const claimed = await claimOnce(`roles:check:${user.discordId}`, config.roleRecheckSeconds);
+  if (!claimed) return user;
+
+  let guildRoles: string[] | null;
+  try {
+    guildRoles = await fetchMemberRolesAsBot(user.discordId);
+  } catch (err) {
+    logger.warn(
+      { discordId: user.discordId, err: (err as Error).message },
+      "guild role re-check failed - keeping the cached role until the next request",
+    );
+    return user;
+  }
+
+  const revoke = async (held: string[], leftGuild: boolean) => {
+    logger.info(
+      { discordId: user.discordId, leftGuild },
+      "archive access revoked - signing the account out everywhere",
+    );
+    await destroyAllSessionsFor(user.id);
+    await db
+      .update(users)
+      .set({ discordRoles: held, rolesCheckedAt: new Date() })
+      .where(eq(users.id, user.id));
+    // Losing access is the kind of thing someone will later need to explain,
+    // so it goes in the append-only trail and not only in the service log,
+    // which rotates. `system` is the honest actor: Discord decided this, and
+    // nobody here pressed a button.
+    await recordAudit({
+      actorType: "system",
+      action: "user.access_revoked",
+      targetType: "user",
+      targetId: user.id,
+      metadata: { discordId: user.discordId, leftGuild, previousRole: user.role },
+    });
+  };
+
+  // No longer in the guild at all.
+  if (guildRoles === null) {
+    await revoke([], true);
+    return null;
+  }
+
+  // Still a member, but holds nothing that grants access any more.
+  const role = roleForMember(user.discordId, guildRoles);
+  if (role === null) {
+    await revoke(guildRoles, false);
+    return null;
+  }
+
+  const updated = await db
+    .update(users)
+    .set({ role, discordRoles: guildRoles, rolesCheckedAt: new Date() })
+    .where(eq(users.id, user.id))
+    .returning();
+  return updated[0] ?? { ...user, role };
 }
 
 export async function destroySession(cookieValue: string | undefined): Promise<void> {
@@ -116,19 +213,6 @@ export async function pruneExpiredSessions(): Promise<number> {
   return removed.length;
 }
 
-/**
- * Role for a freshly authenticated Discord account.
- *
- * Driven entirely by env allowlists: there is no in-app path to grant
- * yourself privileges, which is the point - the archive is public to read and
- * closed to write.
- */
-export function roleForDiscordId(discordId: string): UserRole {
-  if (config.adminIds.has(discordId)) return "admin";
-  if (config.moderatorIds.has(discordId)) return "moderator";
-  return "viewer";
-}
-
 export interface DiscordProfile {
   id: string;
   username: string;
@@ -137,14 +221,34 @@ export interface DiscordProfile {
 }
 
 /**
- * Upsert the Discord account into `users`.
+ * Upsert the Discord account into `users` and return its session identity.
  *
- * An existing user keeps whatever role an admin set by hand *unless* the env
- * allowlist grants a higher one, so promoting someone is a config change and
- * demoting them is an explicit admin action.
+ * Throws 403 when the guild roles grant nothing, so a sign-in by someone
+ * without a granting role creates no row, issues no session and leaves
+ * nothing behind to be promoted later.
+ *
+ * The role is *overwritten* from the guild on every login rather than kept at
+ * its highest-ever value. The high-water mark was right while the role only
+ * unlocked the staff tools and a demotion was an admin decision; it is wrong
+ * now that Discord is the access list, because it would make a demotion in
+ * Discord something the archive quietly ignores.
  */
-export async function upsertDiscordUser(profile: DiscordProfile): Promise<SessionUser> {
-  const envRole = roleForDiscordId(profile.id);
+export async function upsertDiscordUser(
+  profile: DiscordProfile,
+  guildRoleIds: readonly string[],
+): Promise<SessionUser> {
+  const role = roleForMember(profile.id, guildRoleIds);
+  if (!role) throw forbidden(NO_ROLE_MESSAGE);
+
+  const shared = {
+    username: profile.username,
+    globalName: profile.globalName,
+    avatar: profile.avatar,
+    role,
+    discordRoles: [...guildRoleIds],
+    rolesCheckedAt: new Date(),
+    lastLoginAt: new Date(),
+  };
 
   const existing = await db
     .select()
@@ -154,17 +258,11 @@ export async function upsertDiscordUser(profile: DiscordProfile): Promise<Sessio
     .then((r) => r[0]);
 
   if (existing) {
-    const rank = { viewer: 0, moderator: 1, admin: 2 } as const;
-    const role = rank[envRole] > rank[existing.role] ? envRole : existing.role;
+    // `disabled` is a manual block by an admin and outranks any guild role.
+    if (existing.disabled) throw forbidden("This account has been blocked from the archive");
     const updated = await db
       .update(users)
-      .set({
-        username: profile.username,
-        globalName: profile.globalName,
-        avatar: profile.avatar,
-        role,
-        lastLoginAt: new Date(),
-      })
+      .set(shared)
       .where(eq(users.id, existing.id))
       .returning();
     return toSessionUser(updated[0]!);
@@ -172,15 +270,7 @@ export async function upsertDiscordUser(profile: DiscordProfile): Promise<Sessio
 
   const inserted = await db
     .insert(users)
-    .values({
-      id: newId(),
-      discordId: profile.id,
-      username: profile.username,
-      globalName: profile.globalName,
-      avatar: profile.avatar,
-      role: envRole,
-      lastLoginAt: new Date(),
-    })
+    .values({ id: newId(), discordId: profile.id, ...shared })
     .returning();
   return toSessionUser(inserted[0]!);
 }

@@ -22,6 +22,10 @@ const nextConfig = {
         source: "/:path*",
         headers: [
           { key: "x-content-type-options", value: "nosniff" },
+          // Belt and braces with the metadata in app/layout.tsx and
+          // public/robots.txt: a header applies to redirects and to
+          // responses a crawler never renders.
+          { key: "x-robots-tag", value: "noindex, nofollow, noarchive" },
           { key: "x-frame-options", value: "DENY" },
           { key: "referrer-policy", value: "strict-origin-when-cross-origin" },
           { key: "permissions-policy", value: "camera=(), microphone=(), geolocation=()" },

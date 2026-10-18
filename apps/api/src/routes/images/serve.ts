@@ -13,8 +13,16 @@ import { visibilityOf } from "../helpers.js";
  * Image delivery.
  *
  * An id never changes what it points at - a re-upload produces a new id - so
- * responses are `immutable` with a one-year TTL and Cloudflare serves almost
- * all of this traffic without touching the homeserver at all.
+ * responses stay `immutable` with a one-year TTL, and a viewer who opens the
+ * same record twice fetches the bytes once.
+ *
+ * They are `private` rather than `public`, though, which costs the archive the
+ * Cloudflare edge cache it used to lean on: every image now reaches the
+ * homeserver. That is the price of the bytes being gated at all. An evidence
+ * screenshot sitting behind a guessable-free but *public* URL is still a
+ * public image, and the whole point of the role gate is that the evidence is
+ * not public - so the edge cannot be allowed to answer for us. The 304 path
+ * below keeps the repeat cost to a conditional request.
  */
 
 const serveParams = z.object({
@@ -102,9 +110,10 @@ export async function imageServeRoutes(app: FastifyInstance): Promise<void> {
     reply.header(
       "cache-control",
       meta.status === "published"
-        ? "public, max-age=31536000, s-maxage=31536000, immutable"
+        ? "private, max-age=31536000, immutable"
         : "private, no-store",
     );
+    reply.header("vary", "Cookie, Authorization");
 
     const inm = req.headers["if-none-match"];
     if (inm && inm.split(",").some((tag) => tag.trim() === etag)) {
@@ -122,7 +131,7 @@ export async function imageServeRoutes(app: FastifyInstance): Promise<void> {
     if (!meta) throw notFound("Image");
     if (meta.status !== "published" && visibilityOf(req) !== "moderator") throw notFound("Image");
 
-    reply.header("cache-control", "public, max-age=60, s-maxage=600");
+    reply.header("cache-control", "private, max-age=60");
     return {
       image: {
         ...meta,

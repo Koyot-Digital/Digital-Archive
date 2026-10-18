@@ -54,7 +54,12 @@ export const users = pgTable(
     username: varchar("username", { length: 64 }).notNull(),
     globalName: varchar("global_name", { length: 64 }),
     avatar: varchar("avatar", { length: 128 }),
+    /** Derived from `discordRoles`, cached so a read does not call Discord. */
     role: varchar("role", { length: 16 }).$type<UserRole>().notNull().default("viewer"),
+    /** Role snowflakes held in the gating guild at the last check. */
+    discordRoles: text("discord_roles").array().$type<string[]>().notNull().default([]),
+    /** When the guild was last asked. NULL forces a re-check. */
+    rolesCheckedAt: timestamp("roles_checked_at", { withTimezone: true }),
     disabled: boolean("disabled").notNull().default(false),
     createdAt: createdAt(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
@@ -62,6 +67,7 @@ export const users = pgTable(
   (t) => ({
     discordIdx: uniqueIndex("users_discord_id_key").on(t.discordId),
     roleIdx: index("users_role_idx").on(t.role),
+    rolesCheckedIdx: index("users_roles_checked_idx").on(t.rolesCheckedAt),
   }),
 );
 

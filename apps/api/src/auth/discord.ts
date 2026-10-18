@@ -5,28 +5,44 @@ import type { DiscordProfile } from "./session.js";
 /**
  * Minimal Discord OAuth2 client.
  *
- * Only `identify` (plus `guilds.members.read` when a guild gate is
- * configured) is requested: the archive needs to know who you are, nothing
- * more. No bot token, no message scopes.
+ * Two scopes and no more: `identify` to know who you are, and
+ * `guilds.members.read` to read which roles you hold in the one guild that
+ * gates this archive. No message scopes, no email, no guild list.
  */
 
 const API = "https://discord.com/api/v10";
 const TIMEOUT_MS = 8_000;
 
 export function scopes(): string[] {
-  return config.DISCORD_REQUIRED_GUILD_ID
-    ? ["identify", "guilds.members.read"]
-    : ["identify"];
+  // Both are always requested. Access is decided by a guild role, so a token
+  // that cannot read the caller's roles is of no use to us.
+  return ["identify", "guilds.members.read"];
 }
 
-export function authorizeUrl(state: string): string {
+/**
+ * The authorize URL.
+ *
+ * `prompt=none` skips Discord's consent screen for an account that has
+ * already granted these scopes, which is the right default - a moderator
+ * signing in twice a day should not have to re-approve anything.
+ *
+ * It is the wrong behaviour in one case, which is why this is a parameter.
+ * The archive now always asks for `guilds.members.read`, and an account that
+ * authorised an earlier build granted only `identify`. Asking for a scope it
+ * has not granted while also telling Discord not to prompt is a contradiction,
+ * and the user ends up back at /login holding an OAuth error they cannot act
+ * on - clicking the button again produces the same error forever. So the
+ * login page offers a retry that passes `forceConsent`, which drops the
+ * restriction and lets Discord ask the question it needs to ask.
+ */
+export function authorizeUrl(state: string, forceConsent = false): string {
   const params = new URLSearchParams({
     client_id: config.DISCORD_CLIENT_ID,
     redirect_uri: config.DISCORD_REDIRECT_URI,
     response_type: "code",
     scope: scopes().join(" "),
     state,
-    prompt: "none",
+    prompt: forceConsent ? "consent" : "none",
   });
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
@@ -89,15 +105,21 @@ export async function fetchProfile(accessToken: string): Promise<DiscordProfile>
   };
 }
 
+interface GuildMemberResponse {
+  roles?: string[];
+}
+
 /**
- * Enforce the optional guild gate.
+ * The roles the signing-in account holds in the gating guild.
  *
- * Discord answers 404 for "not a member", which we translate into a plain
- * 403 rather than leaking whether the guild exists.
+ * Discord answers 404 for "not a member", which becomes a plain 403 rather
+ * than leaking whether the guild exists. Anything else that is not a 200 is a
+ * 502: a Discord outage must read as "we could not check", never as "you have
+ * no roles", because the second one would quietly fail *open* for an endpoint
+ * whose entire job is to decide access.
  */
-export async function assertGuildMembership(accessToken: string): Promise<void> {
+export async function fetchMemberRoles(accessToken: string): Promise<string[]> {
   const guildId = config.DISCORD_REQUIRED_GUILD_ID;
-  if (!guildId) return;
 
   const res = await fetch(`${API}/users/@me/guilds/${guildId}/member`, {
     headers: { authorization: `Bearer ${accessToken}` },
@@ -112,6 +134,42 @@ export async function assertGuildMembership(accessToken: string): Promise<void> 
       expose: false,
     });
   }
+
+  const member = (await res.json()) as GuildMemberResponse;
+  return member.roles ?? [];
+}
+
+/**
+ * The same lookup with the bot token, for re-checking a session whose owner
+ * is not standing in front of an OAuth prompt.
+ *
+ * Returns null when the account is no longer in the guild, and throws when
+ * Discord could not be reached - the caller decides what a failed check means,
+ * because "left the guild" and "Discord is down" must not collapse into one
+ * value.
+ */
+export async function fetchMemberRolesAsBot(discordId: string): Promise<string[] | null> {
+  const guildId = config.DISCORD_REQUIRED_GUILD_ID;
+  if (!config.DISCORD_BOT_TOKEN) {
+    throw new AppError(503, "discord_error", "No bot token: cannot re-verify guild roles", {
+      expose: false,
+    });
+  }
+
+  const res = await fetch(`${API}/guilds/${guildId}/members/${discordId}`, {
+    headers: { authorization: `Bot ${config.DISCORD_BOT_TOKEN}` },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+
+  if (res.status === 404) return null; // no longer a member
+  if (!res.ok) {
+    throw new AppError(502, "discord_error", `Discord member lookup returned ${res.status}`, {
+      expose: false,
+    });
+  }
+
+  const member = (await res.json()) as GuildMemberResponse;
+  return member.roles ?? [];
 }
 
 /** CDN avatar URL, or null when the account uses a default avatar. */

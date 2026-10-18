@@ -58,10 +58,39 @@ const envSchema = z
     DISCORD_CLIENT_ID: z.string().default(""),
     DISCORD_CLIENT_SECRET: z.string().default(""),
     DISCORD_REDIRECT_URI: z.string().default(""),
+    /**
+     * The guild whose roles decide access. Mandatory under AUTH_ENABLED:
+     * every app role is derived from a role in *this* guild, so without it
+     * there is nothing to derive from.
+     */
     DISCORD_REQUIRED_GUILD_ID: z.string().default(""),
+
+    /**
+     * Guild role snowflakes that grant each app role, highest wins.
+     *
+     * These are the access control list. Holding none of them means no
+     * account is created and nothing is served - not even a record listing.
+     */
+    ADMIN_DISCORD_ROLE_IDS: csv,
+    MODERATOR_DISCORD_ROLE_IDS: csv,
+    VIEWER_DISCORD_ROLE_IDS: csv,
+
+    /**
+     * Per-account overrides, by Discord user id. Kept because an owner has to
+     * be able to reach the admin tools without depending on a guild role
+     * being intact - but they are overrides, not the primary mechanism, and
+     * they cannot grant access to someone who has left the guild.
+     */
     ADMIN_DISCORD_IDS: csv,
     MODERATOR_DISCORD_IDS: csv,
+
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(14),
+    /**
+     * How long a session is trusted before the viewer's guild roles are
+     * re-fetched. A role removed in Discord takes at most this long to end
+     * the session, which is why a 14-day cookie is not a 14-day grant.
+     */
+    ROLE_RECHECK_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
 
     /**
      * Bot token used to resolve the Discord accounts that appear on scraped
@@ -105,13 +134,40 @@ const envSchema = z
       });
     }
     if (env.AUTH_ENABLED) {
-      for (const key of ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_REDIRECT_URI"] as const) {
+      for (const key of [
+        "DISCORD_CLIENT_ID",
+        "DISCORD_CLIENT_SECRET",
+        "DISCORD_REDIRECT_URI",
+        // The whole archive is role-gated, so the guild is not optional.
+        "DISCORD_REQUIRED_GUILD_ID",
+        // Roles are re-checked mid-session with a bot token. Without one a
+        // removed role would keep working until the cookie expired, which
+        // turns a 15-minute revocation into a two-week one.
+        "DISCORD_BOT_TOKEN",
+      ] as const) {
         if (!env[key]) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: `${key} is required when AUTH_ENABLED=true`,
           });
         }
+      }
+
+      // Fail at boot rather than serve a site nobody can get into.
+      const grants =
+        env.ADMIN_DISCORD_ROLE_IDS.length +
+        env.MODERATOR_DISCORD_ROLE_IDS.length +
+        env.VIEWER_DISCORD_ROLE_IDS.length +
+        env.ADMIN_DISCORD_IDS.length +
+        env.MODERATOR_DISCORD_IDS.length;
+      if (grants === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "No access is granted to anyone: set at least one of " +
+            "ADMIN_DISCORD_ROLE_IDS, MODERATOR_DISCORD_ROLE_IDS, " +
+            "VIEWER_DISCORD_ROLE_IDS, ADMIN_DISCORD_IDS or MODERATOR_DISCORD_IDS",
+        });
       }
     }
   });
@@ -139,6 +195,12 @@ export const config = {
 
   adminIds: new Set(env.ADMIN_DISCORD_IDS),
   moderatorIds: new Set(env.MODERATOR_DISCORD_IDS),
+
+  adminRoleIds: new Set(env.ADMIN_DISCORD_ROLE_IDS),
+  moderatorRoleIds: new Set(env.MODERATOR_DISCORD_ROLE_IDS),
+  viewerRoleIds: new Set(env.VIEWER_DISCORD_ROLE_IDS),
+
+  roleRecheckSeconds: env.ROLE_RECHECK_MINUTES * 60,
 
   /** Public URL for a stored image variant. */
   imageUrl(id: string, variant: "full" | "thumb" = "full"): string {

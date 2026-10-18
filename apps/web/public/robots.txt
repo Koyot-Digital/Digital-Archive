@@ -1,7 +1,11 @@
+# The archive is private: every page requires a Discord sign-in and a role in
+# the archive's guild. There is nothing here a crawler can reach, and an
+# indexed title or excerpt would leak the contents of records the gate exists
+# to keep private - so the whole site is disallowed rather than selected parts
+# of it.
+#
+# Reinforced by an X-Robots-Tag header (apps/web/next.config.mjs) and by the
+# robots metadata in apps/web/app/layout.tsx, because robots.txt is a request
+# and the other two are not.
 User-agent: *
-Allow: /
-# Evidence images have permanent URLs but should not be mirrored into image
-# search; the pages themselves are indexable.
-Disallow: /moderation
-Disallow: /login
-Disallow: /search
+Disallow: /

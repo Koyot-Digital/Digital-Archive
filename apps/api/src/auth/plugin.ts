@@ -14,8 +14,8 @@ import { SESSION_COOKIE, ensureDevUser, resolveSession, type SessionUser } from 
  * Request identity.
  *
  * Three shapes, resolved once per request in an onRequest hook:
- *   anon    - public reads only
- *   user    - a Discord session; carries a role
+ *   anon    - reaches /health and the auth endpoints, nothing else
+ *   user    - a Discord session; carries a role derived from a guild role
  *   api_key - a scraper credential; carries scopes, never a role
  *
  * Keeping scrapers out of the role system is deliberate: an ingest token can
@@ -48,6 +48,32 @@ declare module "fastify" {
     requireScope(...scopes: ApiKeyScope[]): preHandlerHookHandler;
     requireWriter(min: UserRole, ...scopes: ApiKeyScope[]): preHandlerHookHandler;
   }
+}
+
+/**
+ * Paths that answer without a credential.
+ *
+ * Only two kinds, and both have to be open for the system to work at all:
+ * the liveness probe that compose and the tunnel poll, and the auth endpoints
+ * themselves - you cannot require a session to obtain one.
+ *
+ * /auth/me and /auth/verify are included deliberately: both answer
+ * "authenticated: false" for an anonymous caller, which is what lets the web
+ * app render a login page instead of a stack trace.
+ */
+function isAlwaysOpen(path: string): boolean {
+  if (path === "/health") return true;
+  const prefix = config.API_PREFIX;
+  return path === `${prefix}/auth` || path.startsWith(`${prefix}/auth/`);
+}
+
+/**
+ * Paths that exist for machines and carry their own scope guard, so the read
+ * gate must not also demand archive:read of them.
+ */
+function isMachinePath(path: string): boolean {
+  const prefix = config.API_PREFIX;
+  return path === `${prefix}/ingress` || path.startsWith(`${prefix}/ingress/`);
 }
 
 function bearer(req: FastifyRequest): string | null {
@@ -123,6 +149,51 @@ export const authPlugin = fp(
           req.auth = { kind: "user", user, role: user.role, apiKey: null, devBypass: false };
         }
       }
+    });
+
+    /**
+     * The gate: nothing is readable without a credential.
+     *
+     * This runs as a hook rather than as a preHandler on each route on
+     * purpose. Per-route guards are opt-in, and an archive that is private
+     * cannot afford a default of "public unless someone remembered" - a route
+     * added next month would ship open, and nothing would fail to tell us.
+     * Inverting it means a new route is closed until it is listed below, and
+     * the list is short enough to read in one sitting.
+     *
+     * Registered after the hook above, so `req.auth` is already resolved.
+     */
+    app.addHook("onRequest", async (req) => {
+      // CORS preflight carries no credentials by definition.
+      if (req.method === "OPTIONS") return;
+
+      const path = req.url.split("?")[0] ?? "/";
+      if (isAlwaysOpen(path)) return;
+
+      if (req.auth.devBypass) return;
+
+      if (req.auth.kind === "user") {
+        // Every role outranks or equals viewer, and an account that holds no
+        // granting guild role never gets a session in the first place - so
+        // reaching here with a user means access was proven. The check stays
+        // as the explicit statement of what the gate requires.
+        if (!roleAtLeast(req.auth.role, "viewer")) throw forbidden("Requires archive access");
+        return;
+      }
+
+      if (req.auth.kind === "api_key") {
+        // Writes are guarded per route by requireScope/requireWriter. What is
+        // left is reads, and a key only reads the archive with archive:read -
+        // so an ingest credential that leaks cannot be turned around and used
+        // to pull the archive back out.
+        const isRead = req.method === "GET" || req.method === "HEAD";
+        if (isRead && !isMachinePath(path) && !req.auth.apiKey?.scopes.includes("archive:read")) {
+          throw forbidden("API key is missing scope: archive:read");
+        }
+        return;
+      }
+
+      throw unauthorized("Sign in with Discord to view the archive");
     });
 
     /** Human roles only. An API key never satisfies this. */

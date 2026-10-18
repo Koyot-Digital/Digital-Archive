@@ -97,6 +97,17 @@ export const INVERSE_RELATION: Record<SubjectRelation, SubjectRelation> = {
 export const THREAD_ROLES = ["author", "commenter"] as const;
 export type ThreadRole = (typeof THREAD_ROLES)[number];
 
+/**
+ * The session cookie's name.
+ *
+ * Lives here because two codebases read it: the API sets and verifies it, and
+ * the web middleware checks for its presence to turn anonymous traffic away
+ * before a page renders. A drift between those two spellings would not fail
+ * loudly - it would silently let every request through the middleware and
+ * leave the gate resting entirely on the layer behind it.
+ */
+export const SESSION_COOKIE_NAME = "archive_session";
+
 export const USER_ROLES = ["viewer", "moderator", "admin"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -130,6 +141,8 @@ export const AUDIT_ACTIONS = [
   "user.login",
   "user.logout",
   "user.role_change",
+  /** A guild role was removed, so every session for that account was ended. */
+  "user.access_revoked",
   "apikey.create",
   "apikey.revoke",
   "ingress.batch",

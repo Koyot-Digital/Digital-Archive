@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { config } from "../config.js";
-import { badRequest, unauthorized } from "../lib/errors.js";
+import { AppError, badRequest, unauthorized } from "../lib/errors.js";
 import { randomToken, sign, unsign } from "../lib/crypto.js";
 import { recordAudit } from "../services/audit.js";
 import { actorOf } from "./plugin.js";
@@ -28,6 +28,19 @@ const callbackQuery = z.object({
   error: z.string().max(128).optional(),
   error_description: z.string().max(512).optional(),
 });
+
+/**
+ * Send a refused sign-in back to the web app's login page.
+ *
+ * A bare 403 here would leave the visitor staring at a JSON body on
+ * api.<domain>, with no way back and no explanation. The two refusals that
+ * are the viewer's own business - not in the guild, or in it without a
+ * granting role - are the common case now that the whole archive is gated, so
+ * they get a page rather than a status code.
+ */
+function denied(reason: "not_member" | "no_role"): string {
+  return `${config.WEB_ORIGIN}/login?denied=${reason}`;
+}
 
 /** Only allow redirects back into our own web origin. */
 function safeReturnTo(raw: string | undefined): string {
@@ -74,7 +87,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.redirect(safeReturnTo((req.query as { return_to?: string }).return_to), 302);
     }
 
-    const returnTo = safeReturnTo((req.query as { return_to?: string }).return_to);
+    const query = req.query as { return_to?: string; reauth?: string };
+    const returnTo = safeReturnTo(query.return_to);
     const nonce = randomToken(16);
     const state = sign(`${nonce}|${Buffer.from(returnTo).toString("base64url")}`);
 
@@ -83,7 +97,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       // The callback is a top-level cross-site GET from discord.com.
       sameSite: "lax",
     });
-    return reply.redirect(discord.authorizeUrl(state), 302);
+    // `reauth=1` is the login page's escape hatch out of an OAuth error - see
+    // authorizeUrl(). It only ever relaxes Discord's prompt behaviour; it
+    // grants nothing and skips no check on this side.
+    const forceConsent = query.reauth === "1";
+    return reply.redirect(discord.authorizeUrl(state, forceConsent), 302);
   });
 
   app.get("/auth/discord/callback", async (req, reply) => {
@@ -113,11 +131,35 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     );
 
     const accessToken = await discord.exchangeCode(code);
-    await discord.assertGuildMembership(accessToken);
+
+    // Roles first, profile second: there is no reason to learn anything about
+    // an account that is not getting in.
+    let guildRoles: string[];
+    try {
+      guildRoles = await discord.fetchMemberRoles(accessToken);
+    } catch (err) {
+      if (err instanceof AppError && err.statusCode === 403) {
+        return reply.redirect(denied("not_member"), 302);
+      }
+      throw err;
+    }
+
     const profile = await discord.fetchProfile(accessToken);
 
     const { upsertDiscordUser } = await import("./session.js");
-    const user = await upsertDiscordUser(profile);
+    let user;
+    try {
+      user = await upsertDiscordUser(profile, guildRoles);
+    } catch (err) {
+      if (err instanceof AppError && err.statusCode === 403) {
+        req.log.info(
+          { discordId: profile.id, roles: guildRoles.length },
+          "sign-in refused: no granting guild role",
+        );
+        return reply.redirect(denied("no_role"), 302);
+      }
+      throw err;
+    }
 
     const session = await createSession(user.id, {
       ip: req.ip,

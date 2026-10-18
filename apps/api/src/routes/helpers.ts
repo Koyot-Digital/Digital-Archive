@@ -71,24 +71,27 @@ export function actorFor(req: FastifyRequest): { userId?: string | null; apiKeyI
 /**
  * Cache headers.
  *
- * Public reads are cacheable at the Cloudflare edge; anything a moderator can
- * see is private, because the same URL returns different bodies per role.
+ * Every response is `private`, and the `s-maxage` that used to let Cloudflare
+ * serve archive reads from its edge is gone. That was correct while reading
+ * was public; it is a hole now that it is not, because a shared cache keyed on
+ * URL alone would happily hand a stored copy to the next caller - who may have
+ * no session at all. `Vary: Cookie` is not a defence worth betting the archive
+ * on: it is advisory, trivially mishandled by intermediaries, and a cache that
+ * ignores it fails silently and in the wrong direction.
+ *
+ * `private, max-age` still lets the viewer's *own* browser cache, which is
+ * where most of the benefit was anyway. Anything a moderator can see is
+ * no-store, because the same URL returns a different body per role.
  */
 export function setReadCache(
   reply: FastifyReply,
   visibility: Visibility,
   seconds: number,
-  staleWhileRevalidate = seconds * 4,
 ): void {
-  if (visibility === "moderator") {
-    reply.header("cache-control", "private, no-store");
-    return;
-  }
   reply.header(
     "cache-control",
-    `public, max-age=${Math.min(seconds, 60)}, s-maxage=${seconds}, stale-while-revalidate=${staleWhileRevalidate}`,
+    visibility === "moderator" ? "private, no-store" : `private, max-age=${Math.min(seconds, 60)}`,
   );
-  // The response varies by role, which is carried in a cookie.
   reply.header("vary", "Cookie, Authorization, Origin");
 }
 

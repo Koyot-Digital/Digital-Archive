@@ -7,8 +7,12 @@ text    https://api.domain.com/digitalarchive/v1
 images  https://api.domain.com/digitalarchive/v1/images
 ```
 
-Reads are public. Writes need either a Discord session carrying a role, or an
-API key carrying the matching scope.
+Nothing is public. Every endpoint below needs a credential; an unauthenticated
+request gets `401` everywhere except `/health` and `/auth/*`.
+
+Reads need a Discord session whose account holds an access role in the
+archive's guild, or an API key carrying `archive:read`. Writes need a
+moderator session or a key carrying the matching write scope.
 
 **Authentication** - one of:
 
@@ -17,6 +21,11 @@ Cookie: archive_session=…          browser, set by the OAuth flow
 Authorization: Bearer da_…         scraper
 X-API-Key: da_…                    scraper, equivalent
 ```
+
+The cookie is scoped to the parent domain of the web and API origins, so a
+browser signed in on the site sends it here too. Note that `archive:read` is a
+separate scope from `ingress:write`: a key minted for a scraper cannot read
+the archive back out unless it was granted both.
 
 **Errors** are always this shape. Branch on `code`; quote `requestId` when
 reporting a failure, it matches the server log.
@@ -383,9 +392,28 @@ exist - only its SHA-256 is stored. A key cannot revoke itself.
 | `POST /auth/logout` | Destroys the session. |
 | `GET /auth/verify` | Lightweight validity + role check. |
 
+These five, plus `/health`, are the only paths that answer without a
+credential - you cannot require a session in order to obtain one. `/auth/me`
+and `/auth/verify` report `authenticated: false` to an anonymous caller rather
+than refusing, which is what lets the web app render a login page.
+
+The OAuth flow requests two scopes: `identify`, and `guilds.members.read` to
+read which roles the account holds in `DISCORD_REQUIRED_GUILD_ID`. A sign-in
+by an account that is not in that guild, or is in it without a granting role,
+creates no user row and no session; the callback redirects to
+`/login?denied=not_member` or `/login?denied=no_role` on the web origin rather
+than returning a bare 403 on this one.
+
+A live session's roles are re-checked against the guild every
+`ROLE_RECHECK_MINUTES` with the bot token, de-duplicated through Redis so a
+page load costs one lookup rather than one per request. A role removed in
+Discord ends the session - all of that account's sessions - within that
+window. An unreachable Discord keeps the cached role and retries on the next
+request.
+
 With `AUTH_ENABLED=false`, `/auth/me` reports a synthetic dev administrator and
-every authorisation check passes. The API refuses to start in that state when
-`NODE_ENV=production`.
+every authorisation check passes, including the read gate. The API refuses to
+start in that state when `NODE_ENV=production`.
 
 ---
 
@@ -395,7 +423,7 @@ Per minute, keyed by API key when present, then by user, then by IP:
 
 | | Default |
 | --- | --- |
-| Public reads | 240 |
+| Reads | 240 |
 | Ingress | 120 (overridden per key) |
 | Uploads | 60 |
 
@@ -405,7 +433,19 @@ unavailable the limiter fails open - the archive stays readable.
 
 ## Caching
 
-Public reads are `s-maxage` 30–300s with `stale-while-revalidate` and
-`Vary: Cookie, Authorization, Origin`. Anything a moderator can see is
+Everything is `private`. There is no `s-maxage` and no shared-cache tier: a
+CDN keys on URL, so a stored copy of a record could be handed to a caller with
+no session at all, and `Vary: Cookie` is advisory - an intermediary that
+ignores it fails silently and in the wrong direction. The `Vary` header is
+still sent, but nothing depends on it being honoured.
+
+Reads are `private, max-age` up to 60s; anything a moderator can see is
 `private, no-store`, because the same URL returns different bodies per role.
-Image bytes are `immutable` for a year.
+Image bytes stay `immutable` for a year but are `private` too, so they are
+cached in the viewer's own browser and nowhere else - which means evidence
+images now reach the homeserver instead of being served from Cloudflare's
+edge. That is the cost of the bytes being gated at all.
+
+If you front this with Cloudflare, make sure no "Cache Everything" rule
+overrides the origin's `private` - that would reintroduce exactly the shared
+cache these headers exist to prevent.

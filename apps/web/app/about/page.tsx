@@ -22,6 +22,21 @@ export default function AboutPage() {
           change made to a record after it was filed.
         </p>
 
+        <h2>Who can read it</h2>
+        <p>
+          Nobody, without a Discord account holding an access role in the archive&apos;s server.
+          That covers everything - records, evidence images, search, the moderator list and the API
+          - and it is enforced on the server rather than by hiding links: there is no URL that
+          returns archive content to a signed-out visitor. The site is also excluded from search
+          engines, because an indexed excerpt would be a copy of a record sitting outside the gate.
+        </p>
+        <p>
+          Access follows the Discord role rather than a list kept here. Roles are re-checked
+          periodically against the server, so removing someone&apos;s role in Discord ends their
+          access within minutes and signs out every browser they were using - there is no separate
+          account to remember to revoke.
+        </p>
+
         <h2>What a record contains</h2>
         <p>Every entry carries, at minimum:</p>
         <ul>

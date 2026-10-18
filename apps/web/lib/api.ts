@@ -19,6 +19,10 @@ import type {
  * viewer's session cookie is forwarded so the API applies the same visibility
  * rules it would for a direct call - the web app has no privileges of its own
  * and cannot see a hidden record the viewer could not.
+ *
+ * That last property is what makes the role gate hold on this side: there is
+ * no service account here to fall back on, so an unauthenticated render
+ * cannot accidentally succeed. It gets a 401 like anyone else.
  */
 
 const INTERNAL_BASE =
@@ -42,7 +46,11 @@ export class ApiError extends Error {
 }
 
 interface FetchOptions {
-  /** Seconds. 0 disables the cache for role-dependent responses. */
+  /**
+   * Retained so call sites keep documenting how fresh each read needs to be,
+   * and so the API's own cache-control stays meaningful. It no longer selects
+   * a Next data-cache entry - see below.
+   */
   revalidate?: number;
   tags?: string[];
 }
@@ -51,18 +59,26 @@ async function apiGet<T>(path: string, opts: FetchOptions = {}): Promise<T> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
-  // A response that depends on who is asking must never be cached across
-  // viewers, so any request carrying a session is fetched fresh.
-  const cacheable = opts.revalidate !== 0 && !cookieHeader;
-
+  /*
+   * Never cached, deliberately.
+   *
+   * This used to cache any request that carried no cookie, on the reasoning
+   * that a cookie-less response is the same for everybody. That held while
+   * the archive was public. It does not hold now: a cookie-less request is an
+   * unauthenticated one, its response is a 401, and the only thing caching it
+   * could achieve is storing an error. Meanwhile every real read carries a
+   * session and is therefore specific to one viewer and one role.
+   *
+   * So there is nothing left that is both shared and cacheable, and keeping
+   * the branch would leave a cache whose correctness depended on a cookie
+   * check it would be easy to get subtly wrong later.
+   */
   const res = await fetch(`${INTERNAL_BASE}${path}`, {
     headers: {
       accept: "application/json",
       ...(cookieHeader ? { cookie: cookieHeader } : {}),
     },
-    ...(cacheable
-      ? { next: { revalidate: opts.revalidate ?? 60, tags: opts.tags ?? [] } }
-      : { cache: "no-store" }),
+    cache: "no-store",
   });
 
   if (res.status === 404) notFound();
@@ -400,9 +416,19 @@ export const api = {
     }>("/moderation/queue", { revalidate: 0 }),
 };
 
-/** Login URL that returns the viewer to where they were. */
-export function loginUrl(returnTo: string): string {
-  return `${PUBLIC_API_BASE}/auth/discord?return_to=${encodeURIComponent(returnTo)}`;
+/**
+ * Login URL that returns the viewer to where they were.
+ *
+ * `reauth` forces Discord's consent screen. The login page sets it when it is
+ * already displaying an OAuth error, because the most likely cause is an
+ * account that authorised an earlier build and has not granted the scope the
+ * role check needs - and retrying with the same quiet prompt would reproduce
+ * the same error indefinitely.
+ */
+export function loginUrl(returnTo: string, reauth = false): string {
+  const params = new URLSearchParams({ return_to: returnTo });
+  if (reauth) params.set("reauth", "1");
+  return `${PUBLIC_API_BASE}/auth/discord?${params.toString()}`;
 }
 
 export function logoutUrl(): string {

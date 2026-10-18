@@ -42,7 +42,7 @@ const READ_ENDPOINTS: [string, string][] = [
 ];
 
 const IMAGE_ENDPOINTS: [string, string][] = [
-  ["GET /images/:id.webp", "Full-size WebP. Immutable, cached for a year."],
+  ["GET /images/:id.webp", "Full-size WebP. Immutable, cached for a year in the viewer's own browser only."],
   ["GET /images/:id.webp?v=thumb", "Thumbnail variant."],
   ["GET /images/:id/meta", "Dimensions, byte sizes and compression ratio."],
   ["POST /images", "multipart/form-data upload. Requires images:write."],
@@ -55,8 +55,30 @@ export default function ApiDocsPage() {
       <PageHeader
         breadcrumbs={[{ label: "Archive", href: "/" }, { label: "API" }]}
         title="API"
-        description="Reads are public. Writes need either a Discord session with a role, or an API key with the matching scope."
+        description="Nothing here is public. Every read needs a Discord session with an access role, or an API key holding archive:read. Writes need a moderator session or a key with the matching scope."
       />
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-faint">
+          Authentication
+        </h2>
+        <p className="text-xs leading-5 text-muted">
+          Browsers authenticate with the session cookie set by the Discord sign-in, which is scoped
+          to the parent domain and so is sent to this API as well as to the site. Scripts
+          authenticate with an API key, as{" "}
+          <code className="font-mono">Authorization: Bearer &lt;key&gt;</code> or{" "}
+          <code className="font-mono">X-API-Key</code>. A key only reads the archive if it holds the{" "}
+          <code className="font-mono">archive:read</code> scope - an ingest credential cannot be
+          turned around and used to pull the archive back out.
+        </p>
+        <p className="mt-2 text-xs leading-5 text-muted">
+          Unauthenticated requests get <code className="font-mono">401</code> on every path except{" "}
+          <code className="font-mono">/health</code> and the{" "}
+          <code className="font-mono">/auth/*</code> endpoints. Responses are{" "}
+          <code className="font-mono">Cache-Control: private</code> throughout, so none of this is
+          cacheable at a CDN.
+        </p>
+      </section>
 
       <section className="mb-8">
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-faint">

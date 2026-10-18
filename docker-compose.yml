@@ -41,12 +41,22 @@ x-api-env: &api-env
   DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
   DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
   DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-}
+  # The guild whose roles gate the archive. Required: every app role is
+  # derived from a role in this guild.
   DISCORD_REQUIRED_GUILD_ID: ${DISCORD_REQUIRED_GUILD_ID:-}
+  # The access list. Holding none of these roles means no access at all.
+  ADMIN_DISCORD_ROLE_IDS: ${ADMIN_DISCORD_ROLE_IDS:-}
+  MODERATOR_DISCORD_ROLE_IDS: ${MODERATOR_DISCORD_ROLE_IDS:-}
+  VIEWER_DISCORD_ROLE_IDS: ${VIEWER_DISCORD_ROLE_IDS:-}
+  # Per-account overrides, by Discord user id.
   ADMIN_DISCORD_IDS: ${ADMIN_DISCORD_IDS:-}
   MODERATOR_DISCORD_IDS: ${MODERATOR_DISCORD_IDS:-}
   SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-14}
-  # Optional: refreshes the Discord identities on scraped records. Without it
-  # the archive keeps the names and avatars captured at scrape time.
+  ROLE_RECHECK_MINUTES: ${ROLE_RECHECK_MINUTES:-15}
+  # Required when AUTH_ENABLED=true: used to re-check a signed-in account's
+  # guild roles mid-session, which is what makes a revoked role take effect in
+  # minutes rather than whenever the cookie happens to expire. Also refreshes
+  # the Discord identities on scraped records.
   DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
   DISCORD_USER_TTL_HOURS: ${DISCORD_USER_TTL_HOURS:-168}
   STORAGE_ROOT: /data/storage
@@ -201,6 +211,11 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # Read by apps/web/middleware.ts so the development bypass does not send
+      # every request to a login page the API considers unnecessary. The API
+      # refuses AUTH_ENABLED=false under NODE_ENV=production, so this cannot
+      # unlock a deployed instance.
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
       # Server-side renders talk to the API over the compose network.
       INTERNAL_TEXT_API: http://api-text:${TEXT_PORT:-4001}${API_PREFIX:-/digitalarchive/v1}
       INTERNAL_IMAGES_API: http://api-images:${IMAGES_PORT:-4002}${API_PREFIX:-/digitalarchive/v1}
@@ -209,7 +224,9 @@ services:
     depends_on:
       api-text: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/"]
+      # /login rather than /: every other route now redirects to it, and a
+      # probe should assert the app renders, not that it redirects.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/login"]
       interval: 20s
       timeout: 5s
       retries: 5

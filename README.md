@@ -27,7 +27,8 @@ and each surface gets its own edge cache rules and its own failure domain.
 
 ## URLs
 
-Public web interface:
+Web interface. Every one of these requires a signed-in Discord account holding
+an access role - see [Who can do what](#who-can-do-what):
 
 ```
 archive.domain.com/roblox-modlogs/<robloxId>                         all records for an account
@@ -272,30 +273,86 @@ lands around 150–350KB.
 
 ## Who can do what
 
-Reading is public. Writing is not.
+The archive is private. Nothing is readable without a credential - not a
+record, not an evidence image, not search, not the API.
 
 | | Read published | Read hidden/removed | Create | Edit | Change roles |
 | --- | --- | --- | --- | --- | --- |
-| Anonymous | ✅ | | | | |
+| Anonymous | | | | | |
 | `viewer` | ✅ | | | | |
 | `moderator` | ✅ | ✅ | ✅ | ✅ | |
 | `admin` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| API key | ✅ | only with `moderation:read` | with `ingress:write` | | |
+| API key | with `archive:read` | only with `moderation:read` | with `ingress:write` | | |
 
-Roles come from `ADMIN_DISCORD_IDS` / `MODERATOR_DISCORD_IDS` in `.env` -
-there is no in-app path to grant yourself privileges. An existing user keeps a
-hand-set role unless the allowlist grants a higher one, so promotion is a
-config change and demotion is an explicit admin action that also kills the
-target's sessions immediately.
+An anonymous request reaches exactly two things: `/health`, and the `/auth/*`
+endpoints it needs in order to stop being anonymous. Everything else is `401`.
+
+### Access is a Discord role
+
+Roles in one Discord guild (`DISCORD_REQUIRED_GUILD_ID`) are the access list:
+
+```
+ADMIN_DISCORD_ROLE_IDS=…        → admin
+MODERATOR_DISCORD_ROLE_IDS=…    → moderator
+VIEWER_DISCORD_ROLE_IDS=…       → viewer
+```
+
+An account in the guild holding none of them gets no session, no `users` row
+and no data - it is bounced to `/login` with an explanation. `ADMIN_DISCORD_IDS`
+and `MODERATOR_DISCORD_IDS` remain as per-account overrides so an owner is not
+locked out by a mangled role, but neither can admit someone who has left the
+guild. The API refuses to boot if all five lists are empty, rather than serve a
+site nobody can enter.
+
+Grants are derived from the guild on every login and re-derived in the
+background every `ROLE_RECHECK_MINUTES` (default 15) using the bot token. That
+interval is the real revocation window: **removing a role in Discord ends the
+session within minutes and signs out every browser that account was using.**
+There is no in-app path to grant yourself anything, and no separate account to
+remember to revoke. A role that is *lowered* is applied the same way, so a
+demotion in Discord is a demotion here - the old high-water-mark behaviour is
+gone, because it would have made Discord's answer advisory.
+
+If Discord cannot be reached, the cached role is kept and the check is retried
+on the next request. Treating an outage as "holds no roles" would sign out
+every moderator the moment Discord blipped; an unreachable Discord means "we
+could not check", never "you are out".
 
 API keys deliberately sit outside the role system: an ingest token can write
-records but can never read the audit trail or touch a role.
+records but can never read the audit trail, touch a role, or - without
+`archive:read` - read the archive it writes to.
+
+### What the gate costs
+
+Two things that used to be free are not any more, and both are deliberate:
+
+- **No CDN caching.** Every response is `Cache-Control: private`, so
+  Cloudflare no longer serves archive reads or evidence images from its edge
+  and that traffic reaches the homeserver. A shared cache keys on URL and
+  would happily hand a stored record to the next caller, who may have no
+  session at all; `Vary: Cookie` is advisory and fails in the wrong direction
+  when an intermediary ignores it. Browsers still cache privately, which is
+  where most of the benefit was.
+- **No search indexing.** `robots.txt` disallows everything, the pages carry
+  `noindex`, and the web server sends `X-Robots-Tag: noindex` - three layers
+  because an indexed title or excerpt is a copy of a record sitting outside
+  the gate.
 
 ### Hardening notes
 
 - Session tokens are stored as SHA-256 only - a database dump yields no
   replayable logins. Cookies are HMAC-signed, `httpOnly`, `SameSite=Lax`,
   `Secure` in production.
+- The read gate is a global `onRequest` hook with a short allowlist, not a
+  per-route guard. Per-route guards are opt-in, and a private archive cannot
+  default to "public unless someone remembered" - a route added next month
+  would ship open and nothing would fail to say so. Inverted, a new route is
+  closed until it is listed.
+- The web app checks twice, on purpose. `middleware.ts` turns away anyone with
+  no session cookie before a page starts rendering; the root layout then asks
+  the API who they actually are. Only the second check is authoritative - a
+  cookie is a string, and anyone can set `archive_session=x` in their own
+  browser. The middleware is the fast path, not the lock.
 - The audit log is append-only by a Postgres `RULE`: rewriting history is
   impossible even for the table owner. `DELETE` is left available for
   retention pruning - withhold it from the app role (see below).

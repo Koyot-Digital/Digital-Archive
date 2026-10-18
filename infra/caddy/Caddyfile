@@ -99,6 +99,17 @@
 		respond 404
 	}
 
+	# /health is open on the app itself, because the gate cannot require a
+	# session of a liveness probe - but nothing outside needs it. Every probe
+	# that reads it (the compose healthchecks) talks to the container directly
+	# on the internal network and never passes through here, so closing it at
+	# the edge costs nothing and stops an anonymous caller learning whether
+	# auth is on, whether Postgres is up, and how long the process has been
+	# running.
+	handle /health {
+		respond 404
+	}
+
 	handle {
 		request_body {
 			max_size 2MB
@@ -137,8 +148,11 @@
 		}
 	}
 
+	# Closed at the edge for the same reason as on the text listener: the
+	# compose healthcheck reaches this container directly, so the only caller
+	# left out here is one with no business asking.
 	handle /health {
-		reverse_proxy api-images:{$IMAGES_PORT}
+		respond 404
 	}
 
 	handle {
